@@ -37,6 +37,7 @@ public final class CTPPPonderTags {
 
         helper.addToTag(CTPPPonder)
                 .add(CTPPMultiblockMachines.BIG_DAM.getId())
+                .add(CTPPMultiblockMachines.KINETIC_GENERATOR.getId())
                 .add(CTPPMultiblockMachines.SMASHING_FACTORY.getId())
                 .add(CTPPMultiblockMachines.WINDMILL_CONTROL_CENTER.getId())
                 .add(CTPPMachines.CARBON_BRUSHES.getId());

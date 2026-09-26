@@ -28,3 +28,4 @@ src/generated/resources/.cache
 
 # macOS
 .DS_Store
+.mimosa/

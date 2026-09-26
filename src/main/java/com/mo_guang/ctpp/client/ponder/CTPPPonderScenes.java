@@ -8,6 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import com.mo_guang.ctpp.CTPP;
 import com.mo_guang.ctpp.client.ponder.electric.CarbonBrushes;
 import com.mo_guang.ctpp.client.ponder.kinetic.BigDam;
+import com.mo_guang.ctpp.client.ponder.kinetic.KineticGenerator;
 import com.mo_guang.ctpp.client.ponder.kinetic.KineticHatch;
 import com.mo_guang.ctpp.client.ponder.kinetic.SmashingFactory;
 import com.mo_guang.ctpp.client.ponder.kinetic.WindmillControlCenter;
@@ -26,6 +27,9 @@ public final class CTPPPonderScenes {
 
         helper.forComponents(CTPPMultiblockMachines.SMASHING_FACTORY.getId())
                 .addStoryBoard("smashing_factory/common", SmashingFactory::Common, CTPPPonderTags.CTPPPonder);
+
+        helper.forComponents(CTPPMultiblockMachines.KINETIC_GENERATOR.getId())
+                .addStoryBoard("kinetic_generator/common", KineticGenerator::Common, CTPPPonderTags.CTPPPonder);
 
         helper.forComponents(CTPPMultiblockMachines.WINDMILL_CONTROL_CENTER.getId())
                 .addStoryBoard("windmill_control_center/common", WindmillControlCenter::Common,
