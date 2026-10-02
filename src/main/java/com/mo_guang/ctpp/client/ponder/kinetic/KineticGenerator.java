@@ -143,8 +143,7 @@ public class KineticGenerator {
                 GTMachines.FLUID_IMPORT_HATCH[GTValues.LV].defaultBlockState()
                         .setValue(BlockStateProperties.FACING, Direction.SOUTH),
                 true);
-        scene.showUI(LUBRICANT_HATCH_UI).at(util.vector().topOf(util.grid().at(6, 4, 4)))
-                .forMachine(util.grid().at(6, 4, 4))
+        scene.showUI(LUBRICANT_HATCH_UI).at(util.vector().topOf(util.grid().at(6, 4, 4))).machinePos(util.grid().at(6, 4, 4))
                 .tank(0)
                 .withFluid(new FluidStack(GTMaterials.Lubricant.getFluid(), 1000), 20)
                 .show(190);

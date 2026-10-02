@@ -117,8 +117,7 @@ public class BigDam {
                 "不过需要注意的是，如果你没有放置足够的应力输出仓，三峡大坝的应力不会被完全输出")
                 .attachKeyFrame();
         scene.idle(50);
-        scene.showUI(LUBRICANT_HATCH_UI).at(util.vector().topOf(inputHatchPos))
-                .forMachine(inputHatchPos)
+        scene.showUI(LUBRICANT_HATCH_UI).at(util.vector().topOf(inputHatchPos)).machinePos(inputHatchPos)
                 .tank(0)
                 .withFluid(new FluidStack(GTMaterials.Lubricant.getFluid(), 1000), 20)
                 .show(190);

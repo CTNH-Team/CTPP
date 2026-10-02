@@ -105,8 +105,7 @@ public class WindmillControlCenter {
 
         // 5 输入仓与润滑油
         scene.world().setBlock(LUBRICANT_HATCH, GTMachines.FLUID_IMPORT_HATCH[GTValues.LV].defaultBlockState(), true);
-        scene.showUI(LUBRICANT_HATCH_UI).at(util.vector().topOf(LUBRICANT_HATCH))
-                .forMachine(LUBRICANT_HATCH)
+        scene.showUI(LUBRICANT_HATCH_UI).at(util.vector().topOf(LUBRICANT_HATCH)).machinePos(LUBRICANT_HATCH)
                 .tank(0)
                 .withFluid(new FluidStack(GTMaterials.Lubricant.getFluid(), 1000), 20)
                 .show(200);

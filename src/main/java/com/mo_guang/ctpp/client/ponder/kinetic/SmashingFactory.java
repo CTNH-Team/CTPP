@@ -134,8 +134,7 @@ public class SmashingFactory {
                 .setValue(BlockStateProperties.FACING, Direction.NORTH), true);
         scene.world().setBlock(outputBusPos, GTMachines.ITEM_EXPORT_BUS[GTValues.LV].defaultBlockState()
                 .setValue(BlockStateProperties.FACING, Direction.NORTH), true);
-        scene.showUI(ITEM_INPUT_BUS_UI).at(util.vector().topOf(inputBusPos))
-                .forMachine(inputBusPos)
+        scene.showUI(ITEM_INPUT_BUS_UI).at(util.vector().topOf(inputBusPos)).machinePos(inputBusPos)
                 .slot(0)
                 .withItem(new ItemStack(ChemicalHelper.get(TagPrefix.crushed, GTMaterials.Iron).getItem(), 64), 20)
                 .outlineSlot(0, 20)
@@ -147,8 +146,7 @@ public class SmashingFactory {
                 .attachKeyFrame();
         scene.idle(200);
 
-        scene.showUI(ITEM_OUTPUT_BUS_UI).at(util.vector().topOf(outputBusPos))
-                .forMachine(outputBusPos)
+        scene.showUI(ITEM_OUTPUT_BUS_UI).at(util.vector().topOf(outputBusPos)).machinePos(outputBusPos)
                 .slot(0)
                 .withItem(new ItemStack(ChemicalHelper.get(TagPrefix.dust, GTMaterials.Iron).getItem(), 64), 20)
                 .outlineSlot(0, 20)
