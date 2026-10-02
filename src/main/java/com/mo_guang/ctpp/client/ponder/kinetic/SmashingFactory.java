@@ -1,7 +1,11 @@
 package com.mo_guang.ctpp.client.ponder.kinetic;
 
 import com.gregtechceu.gtceu.api.GTValues;
+import com.gregtechceu.gtceu.api.data.chemical.ChemicalHelper;
+import com.gregtechceu.gtceu.api.data.tag.TagPrefix;
 import com.gregtechceu.gtceu.common.data.GTItems;
+import com.gregtechceu.gtceu.common.data.GTMachines;
+import com.gregtechceu.gtceu.common.data.GTMaterials;
 
 import net.createmod.catnip.math.Pointing;
 import net.createmod.ponder.api.PonderPalette;
@@ -12,6 +16,7 @@ import net.createmod.ponder.api.scene.SceneBuildingUtil;
 import net.createmod.ponder.api.scene.Selection;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -20,8 +25,17 @@ import net.minecraft.world.phys.Vec3;
 import com.mo_guang.ctpp.client.ponder.CTPPPonderSceneBuilder;
 import com.mo_guang.ctpp.registry.CTPPMachines;
 import com.simibubi.create.AllBlocks;
+import tech.vixhentx.mcmod.ctnhlib.client.ponder.ui.MachineUI;
 
 public class SmashingFactory {
+
+    /** 物品输入总线的界面；这一段只画，不改机器状态。 */
+    private static final MachineUI ITEM_INPUT_BUS_UI = MachineUI.of(GTMachines.ITEM_IMPORT_BUS[GTValues.LV])
+            .scale(0.6f);
+
+    /** 物品输出总线的界面；这一段只画，不改机器状态。 */
+    private static final MachineUI ITEM_OUTPUT_BUS_UI = MachineUI.of(GTMachines.ITEM_EXPORT_BUS[GTValues.LV])
+            .scale(0.6f);
 
     private SmashingFactory() {}
 
@@ -111,6 +125,39 @@ public class SmashingFactory {
                 "现在你可以正常使用粉碎工厂了。请注意，此机器不会产生任何研磨副产物")
                 .pointAt(util.vector().blockSurface(util.grid().at(4, 1, 2), Direction.WEST))
                 .attachKeyFrame();
+        scene.idle(80);
+
+        // 主方块左右就是物品总线：原料从输入总线进，粉碎好的成品落在输出总线里。
+        BlockPos inputBusPos = util.grid().at(2, 3, 1);
+        BlockPos outputBusPos = util.grid().at(4, 3, 1);
+        scene.world().setBlock(inputBusPos, GTMachines.ITEM_IMPORT_BUS[GTValues.LV].defaultBlockState()
+                .setValue(BlockStateProperties.FACING, Direction.NORTH), true);
+        scene.world().setBlock(outputBusPos, GTMachines.ITEM_EXPORT_BUS[GTValues.LV].defaultBlockState()
+                .setValue(BlockStateProperties.FACING, Direction.NORTH), true);
+        scene.showUI(ITEM_INPUT_BUS_UI).at(util.vector().topOf(inputBusPos))
+                .forMachine(inputBusPos)
+                .slot(0)
+                .withItem(new ItemStack(ChemicalHelper.get(TagPrefix.crushed, GTMaterials.Iron).getItem(), 64), 20)
+                .outlineSlot(0, 20)
+                .show(190);
+        scene.showText(100,
+                "Feed the ore into the item input bus: the bus has its own UI, and that is where the machine loads its input from.",
+                "原料装进物品输入总线：总线有自己的界面，机器就是从那里取料的。")
+                .pointAt(util.vector().blockSurface(inputBusPos, Direction.NORTH))
+                .attachKeyFrame();
+        scene.idle(200);
+
+        scene.showUI(ITEM_OUTPUT_BUS_UI).at(util.vector().topOf(outputBusPos))
+                .forMachine(outputBusPos)
+                .slot(0)
+                .withItem(new ItemStack(ChemicalHelper.get(TagPrefix.dust, GTMaterials.Iron).getItem(), 64), 20)
+                .outlineSlot(0, 20)
+                .show(190);
+        scene.showText(100, "The smashing result lands in the item output bus, and you pull it out from there.",
+                "粉碎出来的成品落在物品输出总线里，从那里取走就行。")
+                .pointAt(util.vector().blockSurface(outputBusPos, Direction.NORTH))
+                .attachKeyFrame();
+        scene.idle(200);
         scene.markAsFinished();
     }
 }

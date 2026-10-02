@@ -1,6 +1,8 @@
 package com.mo_guang.ctpp.client.ponder.kinetic;
 
+import com.gregtechceu.gtceu.api.GTValues;
 import com.gregtechceu.gtceu.common.data.GTItems;
+import com.gregtechceu.gtceu.common.data.GTMachines;
 import com.gregtechceu.gtceu.common.data.GTMaterials;
 
 import net.createmod.catnip.math.Pointing;
@@ -13,11 +15,17 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.fluids.FluidStack;
 
 import com.mo_guang.ctpp.client.ponder.CTPPPonderSceneBuilder;
 import com.mo_guang.ctpp.registry.CTPPMultiblockMachines;
+import tech.vixhentx.mcmod.ctnhlib.client.ponder.ui.MachineUI;
 
 public class BigDam {
+
+    /** 润滑油输入仓的界面；这一段只画，不改机器状态。 */
+    private static final MachineUI LUBRICANT_HATCH_UI = MachineUI.of(GTMachines.FLUID_IMPORT_HATCH[GTValues.LV])
+            .scale(0.6f);
 
     private BigDam() {}
 
@@ -67,8 +75,8 @@ public class BigDam {
             waterSelections[i] = util.select().fromTo(currentEndX, 3, 12, currentEndX + 1, 3, 15);
         }
 
-        BlockPos inputHatchPos = util.grid().at(25, 3, 1);
-        Vec3 inputHatchVec = util.vector().blockSurface(inputHatchPos.below(), Direction.WEST);
+        BlockPos inputHatchPos = util.grid().at(24, 2, 1);
+        Vec3 inputHatchVec = util.vector().blockSurface(inputHatchPos, Direction.NORTH);
 
         CTPPPonderSceneBuilder scene = new CTPPPonderSceneBuilder(builder);
 
@@ -109,12 +117,13 @@ public class BigDam {
                 "不过需要注意的是，如果你没有放置足够的应力输出仓，三峡大坝的应力不会被完全输出")
                 .attachKeyFrame();
         scene.idle(50);
-        scene.overlay().showControls(inputHatchVec, Pointing.RIGHT, 40)
-                .rightClick()
-                .withItem(GTMaterials.Lubricant.getBucket().getDefaultInstance())
-                .whileSneaking();
-        scene.showText(40, "Now, just by inputting lubricating oil, the Big Dam can output stress",
-                "现在只需要输入润滑油，就能使三峡大坝输出应力了")
+        scene.showUI(LUBRICANT_HATCH_UI).at(util.vector().topOf(inputHatchPos))
+                .forMachine(inputHatchPos)
+                .tank(0)
+                .withFluid(new FluidStack(GTMaterials.Lubricant.getFluid(), 1000), 20)
+                .show(190);
+        scene.showText(80, "Now, just by filling lubricating oil into this input hatch, the Big Dam can output stress",
+                "现在只需要往这个输入仓里灌入润滑油，就能使三峡大坝输出应力了")
                 .pointAt(inputHatchVec)
                 .attachKeyFrame();
         scene.world().setKineticSpeed(util.select().position(22, 2, 1), 512);
@@ -123,7 +132,7 @@ public class BigDam {
             scene.world().rotateSection(link, 360, 0, 0, 400);
         }
 
-        scene.idle(50);
+        scene.idle(380);
         scene.markAsFinished();
     }
 }

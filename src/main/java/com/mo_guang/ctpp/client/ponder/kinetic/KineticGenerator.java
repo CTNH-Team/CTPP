@@ -14,11 +14,13 @@ import net.createmod.ponder.api.scene.SceneBuildingUtil;
 import net.createmod.ponder.api.scene.Selection;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.fluids.FluidStack;
 
 import com.mo_guang.ctpp.client.ponder.CTPPPonderSceneBuilder;
 import com.mo_guang.ctpp.registry.CTPPMachines;
+import tech.vixhentx.mcmod.ctnhlib.client.ponder.ui.MachineUI;
 
 /**
  * 应力发电机（{@code ctpp:kinetic_generator}）的思索。
@@ -30,6 +32,10 @@ import com.mo_guang.ctpp.registry.CTPPMachines;
 public class KineticGenerator {
 
     private static final Vec3 MAGNET_PARK = new Vec3(-2d, 5d, 2d);
+
+    /** 润滑油输入仓的界面；这一段只画，不改机器状态。 */
+    private static final MachineUI LUBRICANT_HATCH_UI = MachineUI.of(GTMachines.FLUID_IMPORT_HATCH[GTValues.LV])
+            .scale(0.6f);
 
     private KineticGenerator() {}
 
@@ -101,7 +107,8 @@ public class KineticGenerator {
 
         scene.world().setBlock(util.grid().at(1, 3, 3),
                 CTPPMachines.KINETIC_INPUT_BOX[GTValues.EV].defaultBlockState()
-                        .setValue(BlockStateProperties.FACING, Direction.WEST), true);
+                        .setValue(BlockStateProperties.FACING, Direction.WEST),
+                true);
         scene.overlay().showOutline(PonderPalette.BLUE, "kin_in", util.select().position(1, 3, 3), 80);
         scene.showText(80,
                 "Kinetic input hatches go on this side and feed the stress in. The machine needs at least 512 su to start.",
@@ -122,7 +129,8 @@ public class KineticGenerator {
 
         scene.world().setBlock(util.grid().at(6, 2, 4),
                 CTPPMachines.MECHANICAL_UPGRADE_BUS[GTValues.LV].defaultBlockState()
-                        .setValue(BlockStateProperties.FACING, Direction.SOUTH), true);
+                        .setValue(BlockStateProperties.FACING, Direction.SOUTH),
+                true);
         scene.overlay().showOutline(PonderPalette.RED, "upgrade", util.select().position(6, 2, 4), 80);
         scene.showText(80,
                 "The Mechanical Upgrade Bus sets the mechanical tier, which caps how much EU the generator may output per tick.",
@@ -133,20 +141,24 @@ public class KineticGenerator {
 
         scene.world().setBlock(util.grid().at(6, 4, 4),
                 GTMachines.FLUID_IMPORT_HATCH[GTValues.LV].defaultBlockState()
-                        .setValue(BlockStateProperties.FACING, Direction.SOUTH), true);
-        scene.overlay().showControls(util.vector().blockSurface(util.grid().at(6, 4, 4), Direction.SOUTH),
-                Pointing.LEFT, 40)
-                .rightClick()
-                .withItem(GTMaterials.Lubricant.getBucket().getDefaultInstance());
-        scene.showText(80, "Supply lubricant through the fluid import hatch and the generator keeps running.",
-                "通过流体输入仓供应润滑油，发电机就能持续运转。")
+                        .setValue(BlockStateProperties.FACING, Direction.SOUTH),
+                true);
+        scene.showUI(LUBRICANT_HATCH_UI).at(util.vector().topOf(util.grid().at(6, 4, 4)))
+                .forMachine(util.grid().at(6, 4, 4))
+                .tank(0)
+                .withFluid(new FluidStack(GTMaterials.Lubricant.getFluid(), 1000), 20)
+                .show(190);
+        scene.showText(100,
+                "Lubricant lives in the fluid import hatch itself: the hatch's own UI is the tank you fill, and the generator keeps running.",
+                "润滑油就装在这个流体输入仓里：仓室自己的界面就是那个要灌满的储罐，发电机就能持续运转。")
                 .pointAt(util.vector().blockSurface(util.grid().at(6, 4, 4), Direction.SOUTH))
                 .attachKeyFrame();
-        scene.idle(90);
+        scene.idle(200);
 
         scene.world().setBlock(util.grid().at(7, 3, 3),
                 GTMachines.ENERGY_OUTPUT_HATCH[GTValues.LV].defaultBlockState()
-                        .setValue(BlockStateProperties.FACING, Direction.EAST), true);
+                        .setValue(BlockStateProperties.FACING, Direction.EAST),
+                true);
         scene.overlay().showOutline(PonderPalette.GREEN, "eu_out", util.select().position(7, 3, 3), 80);
         scene.showText(90,
                 "The EU that the generator makes leaves through the energy output hatch. The base ratio is 128 su to 1 EU.",
