@@ -7,7 +7,6 @@
     "BlockPatternMixin",
     "GTBucketItemMixin",
     "RotationPropagatorMixin",
-    "SmartBlockEntityMixin",
     "create.KineticBlockEntityMixin",
     "create.Matrix3dMixin",
     "create.WindmillBearingBlockMixin",

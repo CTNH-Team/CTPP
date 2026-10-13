@@ -1,1 +1,35 @@
 apply from: "$projectDir/dependencies.gradle"
+
+// Exercise Create's real network accounting in the owning module, independently of the aggregate modpack.
+sourceSets.test {
+    compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+    runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+}
+
+legacyForge {
+    addModdingDependenciesTo(sourceSets.test)
+    mods.named(project.mod_id) {
+        sourceSet(sourceSets.test)
+    }
+    runs {
+        gameTestServer {
+            type = "gameTestServer"
+            sourceSet = sourceSets.test
+            gameDirectory.set(file('run/gametest'))
+            systemProperty('forge.enabledGameTestNamespaces', project.mod_id)
+            logLevel = org.slf4j.event.Level.INFO
+        }
+    }
+}
+
+tasks.named('test', Test).configure {
+    // These tests run in Forge's GameTestServer rather than the JUnit runner.
+    failOnNoDiscoveredTests = false
+}
+
+tasks.named('processTestResources').configure {
+    // Reuse the existing empty GameTest template; no GTM test classes are loaded by this run.
+    from(project(':modules:GregTech-Modern').file('src/test/resources/data/gtceu/structures/empty.nbt')) {
+        into 'data/ctpp/structures'
+    }
+}

@@ -110,7 +110,7 @@ public class KineticGeneratorMachine extends KineticWorkableMultiblockMachine
     @Override
     public void updateMachineSpeed() {
         super.updateMachineSpeed();
-        if (!contraptionEntity.isEmpty() && isFormed) {
+        if (!contraptionEntity.isEmpty() && isStructureOperational()) {
             contraptionEntity.forEach(entity -> {
                 var facing = getFrontFacing().getNormal();
                 Vec3 newF = new Vec3(facing.getX(), facing.getY(), facing.getZ());

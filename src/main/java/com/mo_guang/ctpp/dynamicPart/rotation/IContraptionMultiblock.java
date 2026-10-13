@@ -6,6 +6,7 @@ import com.lowdragmc.lowdraglib.utils.TrackedDummyWorld;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -58,9 +59,13 @@ public interface IContraptionMultiblock<T extends SimpleRotatingContraptionEntit
     @SuppressWarnings("unchecked")
     default void findAndReattachEntities() {
         if (self().getLevel() == null || self().getLevel().isClientSide) return;
-        if (getContraptionEntity() == null) setContraptionEntity(new ArrayList<>());
-        // Only search if the list is empty — otherwise entities are already tracked
-        if (!getContraptionEntity().isEmpty()) return;
+        // A partial entity set is possible when several group chunks load in different ticks. Prune stale handles and
+        // search for every missing sibling instead of treating a non-empty list as complete.
+        List<T> attached = getContraptionEntity() == null ? new ArrayList<>() :
+                new ArrayList<>(getContraptionEntity());
+        attached.removeIf(entity -> entity == null || entity.isRemoved() ||
+                entity.controllerPos == null || !entity.controllerPos.equals(self().getPos()));
+        setContraptionEntity(attached);
 
         BlockPos pos = self().getPos();
         // Search in a 32-block radius for entities that reference this controller
@@ -69,12 +74,41 @@ public interface IContraptionMultiblock<T extends SimpleRotatingContraptionEntit
             T srEntity = (T) entity;
             if (srEntity.controllerPos != null && srEntity.controllerPos.equals(pos)) {
                 // Found an entity that belongs to us — reattach
-                getContraptionEntity().add(srEntity);
+                if (!attached.contains(srEntity)) {
+                    attached.add(srEntity);
+                }
                 if (!srEntity.isRunning()) {
                     srEntity.setRunning(true);
                 }
             }
         }
+    }
+
+    /** Exact evidence that every dynamic pattern group still has its controller-owned contraption entity. */
+    default boolean hasCompleteAttachedContraption(int expectedGroups) {
+        List<T> current = getContraptionEntity();
+        if (current != null && current.size() == expectedGroups &&
+                current.stream()
+                        .allMatch(entity -> entity != null && !entity.isRemoved() && entity.controllerPos != null &&
+                                entity.controllerPos.equals(self().getPos()))) {
+            return true;
+        }
+        findAndReattachEntities();
+        return getContraptionEntity() != null && getContraptionEntity().size() == expectedGroups;
+    }
+
+    /**
+     * Whether absence of an entity at the fixed assembly pivot is authoritative. This performs only non-loading
+     * checks; a FULL chunk which has not reached entity-ticking status remains unavailable.
+     */
+    default boolean isAssemblyPivotEntityTicking() {
+        BlockPos pivot = getAssemblyPivot();
+        if (pivot == null || !(self().getLevel() instanceof ServerLevel serverLevel)) {
+            return false;
+        }
+        return serverLevel.getChunkSource().getChunkNow(pivot.getX() >> 4, pivot.getZ() >> 4) != null &&
+                serverLevel.isPositionEntityTicking(pivot) &&
+                serverLevel.areEntitiesLoaded(net.minecraft.world.level.ChunkPos.asLong(pivot));
     }
 
     @Override
@@ -87,13 +121,14 @@ public interface IContraptionMultiblock<T extends SimpleRotatingContraptionEntit
      * multiblock while the contraption is being assembled or disassembled.
      */
     default boolean shouldIgnoreContraptionChange(BlockPos pos, BlockState state) {
+        var dynamicPositions = StaticBlockPattern.getCachedDynamicPositions(getMultiblockState());
+        if (dynamicPositions != null) {
+            // getPattern() invokes a factory that builds the entire pattern, so even obtaining it on every block
+            // notification would make a large contraption's assembly quadratic.
+            return dynamicPositions.contains(pos.asLong());
+        }
         if (this.getPattern() instanceof StaticBlockPattern staticBlockPattern) {
-            var dynamicParts = staticBlockPattern.getDynamicPart(getMultiblockState()).values();
-            for (var dynamicPart : dynamicParts) {
-                if (dynamicPart.contains(pos)) {
-                    return true;
-                }
-            }
+            return staticBlockPattern.isDynamicPosition(getMultiblockState(), pos);
         }
         return false;
     }

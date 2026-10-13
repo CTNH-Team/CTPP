@@ -45,6 +45,7 @@ public class KineticWorkableMultiblockMachine extends KineticMultiblockMachine i
     @Override
     public void onStructureFormed() {
         super.onStructureFormed();
+        refreshInputSpeed();
     }
 
     @Override
@@ -96,9 +97,16 @@ public class KineticWorkableMultiblockMachine extends KineticMultiblockMachine i
     @Override
     public void onChanged() {
         super.onChanged();
+        refreshInputSpeed();
+    }
+
+    private void refreshInputSpeed() {
         speedConsistent = checkInputSpeedConsistent();
         if (speedConsistent) {
             updateMachineSpeed();
+        } else if (speed != 0) {
+            speed = 0;
+            updateRotateBlocks(true);
         }
     }
 
@@ -119,7 +127,7 @@ public class KineticWorkableMultiblockMachine extends KineticMultiblockMachine i
     @Override
     public void addDisplayText(List<Component> textList) {
         super.addDisplayText(textList);
-        if (isFormed) {
+        if (isStructureOperational()) {
             textList.add(inputStress.translate(getTotalInputStress()));
             var lastRecipe = getRecipeLogic().getLastRecipe();
             if (lastRecipe != null)

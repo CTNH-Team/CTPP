@@ -49,7 +49,8 @@ import java.util.List;
 import java.util.Objects;
 
 public abstract class KineticMultiblockMachine extends RecipeMultiblockMachine
-                                               implements IFancyUIMachine, IDisplayUIMachine {
+                                               implements IFancyUIMachine, IDisplayUIMachine,
+                                               IMultiblockKineticOwner {
 
     @Getter
     public LongSet rotateBlocks;
@@ -70,17 +71,16 @@ public abstract class KineticMultiblockMachine extends RecipeMultiblockMachine
 
     @Override
     public void onStructureFormed() {
+        LongSet oldRotateBlocks = rotateBlocks;
         super.onStructureFormed();
         checkTier();
-        rotateBlocks = getMultiblockState().getMatchContext().getOrDefault("roBlocks", LongSets.emptySet());
-        blazeBlocks = getMultiblockState().getMatchContext().getOrDefault("bbBlocks", LongSets.emptySet());
-        for (var pos : rotateBlocks) {
-            var blockEntity = getLevel().getBlockEntity(BlockPos.of(pos));
-            if (blockEntity instanceof KineticBlockEntity kineticBlockEntity) {
-                IKineticBlockEntityExtension mixin = ((IKineticBlockEntityExtension) kineticBlockEntity);
-                mixin.setCTNHInMultiblock(true);
-            }
-        }
+        LongSet newRotateBlocks = getMultiblockState().getMatchContext().getOrDefault("roBlocks",
+                LongSets.emptySet());
+        LongSet newBlazeBlocks = getMultiblockState().getMatchContext().getOrDefault("bbBlocks",
+                LongSets.emptySet());
+        releaseRotateBlocks(oldRotateBlocks, newRotateBlocks);
+        rotateBlocks = newRotateBlocks;
+        blazeBlocks = newBlazeBlocks;
         updateActiveBlocks(getRecipeLogic().isWorking());
     }
 
@@ -88,16 +88,17 @@ public abstract class KineticMultiblockMachine extends RecipeMultiblockMachine
     public void onStructureInvalid() {
         stopWorking();
         super.onStructureInvalid();
-        if (rotateBlocks == null || getLevel() == null) {
-            return;
-        }
-        for (var pos : rotateBlocks) {
-            var blockEntity = getLevel().getBlockEntity(BlockPos.of(pos));
-            if (blockEntity instanceof KineticBlockEntity kineticBlockEntity) {
-                IKineticBlockEntityExtension mixin = ((IKineticBlockEntityExtension) kineticBlockEntity);
-                mixin.setCTNHVisualSpeed(0);
-                mixin.setCTNHInMultiblock(false);
-            }
+        releaseRotateBlocks(rotateBlocks, null);
+        rotateBlocks = null;
+        blazeBlocks = null;
+    }
+
+    @Override
+    protected void onStructureRevalidationChanged(boolean pending) {
+        super.onStructureRevalidationChanged(pending);
+        if (pending) {
+            // Keep the exact claims across a chunk unload, but withdraw only this controller's transient outputs.
+            updateActiveBlocks(false);
         }
     }
 
@@ -136,10 +137,11 @@ public abstract class KineticMultiblockMachine extends RecipeMultiblockMachine
 
     @Override
     public void updateActiveBlocks(boolean active) {
-        super.updateActiveBlocks(active);
-        updateRotateBlocks(active);
+        boolean operationalActive = active && isStructureOperational();
+        super.updateActiveBlocks(operationalActive);
+        updateRotateBlocks(operationalActive);
         try {
-            updateBlazeBlocks(active);
+            updateBlazeBlocks(operationalActive);
         } catch (NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
             throw new RuntimeException(e);
         }
@@ -155,12 +157,13 @@ public abstract class KineticMultiblockMachine extends RecipeMultiblockMachine
     }
 
     public void updateRotateBlocks(boolean active) {
-        if (rotateBlocks != null) {
-            for (Long pos : rotateBlocks) {
-                var blockPos = BlockPos.of(pos);
-                var blockEntity = Objects.requireNonNull(getLevel()).getBlockEntity(blockPos);
-                updateRotateBlock(active, blockEntity);
-            }
+        if (rotateBlocks == null || getLevel() == null) {
+            return;
+        }
+        for (long pos : rotateBlocks) {
+            var blockPos = BlockPos.of(pos);
+            if (!getLevel().isLoaded(blockPos)) continue;
+            updateRotateBlock(active, getLevel().getBlockEntity(blockPos));
         }
     }
 
@@ -168,37 +171,58 @@ public abstract class KineticMultiblockMachine extends RecipeMultiblockMachine
         if (blockEntity instanceof KineticBlockEntity kineticBlockEntity &&
                 kineticBlockEntity instanceof IKineticBlockEntityExtension extension &&
                 !(kineticBlockEntity instanceof KineticMachineBlockEntity)) {
-            extension.setCTNHVisualSpeed(active ? speed : 0);
+            extension.ctpp$claimMultiblockOwner(getPos(), getStructureInstanceId(), active ? speed : 0.0F);
         }
     }
 
     public void updateBlazeBlocks(boolean active) throws NoSuchMethodException, InvocationTargetException,
                                                   IllegalAccessException {
-        if (blazeBlocks != null) {
-            for (Long pos : blazeBlocks) {
-                var blockPos = BlockPos.of(pos);
-                if (getLevel().getBlockEntity(blockPos) != null) {
-                    var blockEntity = Objects.requireNonNull(getLevel()).getBlockEntity(blockPos);
-                    BlazeBurnerBlock.HeatLevel heat = BlazeBurnerBlock.HeatLevel.SMOULDERING;
-                    if (active) {
-                        if (speed >= 256) {
-                            heat = BlazeBurnerBlock.HeatLevel.SEETHING;
-                        } else if (speed >= 128) {
-                            heat = BlazeBurnerBlock.HeatLevel.KINDLED;
-                        } else {
-                            heat = BlazeBurnerBlock.HeatLevel.FADING;
-                        }
-                    }
-                    if (blockEntity instanceof BlazeBurnerBlockEntity blazeBurnerBlockEntity) {
-                        Method method = BlazeBurnerBlockEntity.class.getDeclaredMethod("setBlockHeat",
-                                BlazeBurnerBlock.HeatLevel.class);
-                        method.setAccessible(true);
-                        method.invoke(blazeBurnerBlockEntity, heat);
-                    }
-                }
+        if (blazeBlocks == null || getLevel() == null) {
+            return;
+        }
+        BlazeBurnerBlock.HeatLevel heat = getRequestedBlazeHeat(active);
+        for (long pos : blazeBlocks) {
+            var blockPos = BlockPos.of(pos);
+            if (!getLevel().isLoaded(blockPos)) continue;
+            if (getLevel().getBlockEntity(blockPos) instanceof BlazeBurnerBlockEntity blazeBurner) {
+                Method method = BlazeBurnerBlockEntity.class.getDeclaredMethod("setBlockHeat",
+                        BlazeBurnerBlock.HeatLevel.class);
+                method.setAccessible(true);
+                method.invoke(blazeBurner, heat);
             }
         }
     }
+
+    private BlazeBurnerBlock.HeatLevel getRequestedBlazeHeat(boolean active) {
+        if (!active) return BlazeBurnerBlock.HeatLevel.SMOULDERING;
+        if (speed >= 256) return BlazeBurnerBlock.HeatLevel.SEETHING;
+        if (speed >= 128) return BlazeBurnerBlock.HeatLevel.KINDLED;
+        return BlazeBurnerBlock.HeatLevel.FADING;
+    }
+
+    private void releaseRotateBlocks(LongSet oldBlocks, LongSet retainedBlocks) {
+        if (oldBlocks == null || getLevel() == null) return;
+        for (long pos : oldBlocks) {
+            if (retainedBlocks != null && retainedBlocks.contains(pos)) continue;
+            BlockPos blockPos = BlockPos.of(pos);
+            if (!getLevel().isLoaded(blockPos)) continue;
+            if (getLevel().getBlockEntity(blockPos) instanceof KineticBlockEntity kineticBlockEntity &&
+                    kineticBlockEntity instanceof IKineticBlockEntityExtension extension) {
+                extension.ctpp$releaseMultiblockOwner(getPos(), getStructureInstanceId());
+            }
+        }
+    }
+
+    @Override
+    public boolean ownsKineticVisual(BlockPos pos) {
+        return rotateBlocks != null && rotateBlocks.contains(pos.asLong());
+    }
+
+    @Override
+    public float getKineticVisualSpeed(BlockPos pos) {
+        return ownsKineticVisual(pos) && isStructureOperational() && getRecipeLogic().isWorking() ? speed : 0.0F;
+    }
+
     //////////////////////////////////////
     // ********** GUI ***********//
     //////////////////////////////////////

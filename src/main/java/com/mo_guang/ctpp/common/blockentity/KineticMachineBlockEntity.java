@@ -20,6 +20,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -69,19 +70,51 @@ public class KineticMachineBlockEntity extends KineticBlockEntity implements IMa
     @Getter
     public final MetaMachine metaMachine;
 
+    private static final String APPLIED_SPEED_NBT_KEY = "appliedGeneratedSpeed";
+    private static final String WORKING_SPEED_NBT_KEY = "workingSpeed";
+    private static final String SOURCE_SUSPENDED_NBT_KEY = "generatedSourceSuspended";
+
     private final long offset = GTValues.RNG.nextInt(20);
+
+    /**
+     * The speed requested by the GT recipe/multiblock logic.
+     */
     @Persisted
     @DescSynced
     public float workingSpeed;
-    public boolean reActivateSource;
+
     /**
-     * 重载宽限期：GTCEu 不持久化多方块成型状态，重载后需要异步重检（约 1~1.5s）才能恢复。
-     * 在此期间保留持久化的 workingSpeed 重新挂接 Create 网络，避免应力网络失去源而整体崩溃。
+     * The speed that is currently registered as this block entity's Create network source. Unlike
+     * {@link #workingSpeed}, this value must not depend on the transient GT multiblock binding during world or chunk
+     * load.
      */
-    private static final int GRACE_TICKS = 100;
+    @Getter
+    @Persisted
     @DescSynced
-    private boolean graceActive;
-    private int graceTicks;
+    private float appliedGeneratedSpeed;
+
+    /**
+     * Keeps a persisted output request and ownership binding while withdrawing only its live Create source. A newly
+     * loaded source retains its applied speed long enough for {@link KineticBlockEntity#initialize()} to consume its
+     * unloaded-network contribution exactly once; the owning part then suspends it if its controller remains
+     * unavailable after the bounded reload grace period.
+     */
+    @Persisted
+    private boolean generatedSourceSuspended;
+
+    /** Requests one server-thread reconciliation after Create has initialized its persisted network state. */
+    public boolean reActivateSource;
+
+    /**
+     * Guards the mandatory first-tick reconciliation from Create's propagation callbacks. In particular,
+     * {@link #setSource(BlockPos)} may clear {@link #reActivateSource} while {@code super.tick()} restores a saved
+     * network, but it must not cancel stale-network cleanup for this newly loaded block entity.
+     */
+    private boolean sourceReconcilePending;
+    /** Keeps corrupt/out-of-range saved source state out of propagation until post-initialize repair. */
+    private boolean preAttachReconciliationPending;
+    /** Marks a non-finite persisted source identity that must not enter KineticNetwork.addSilently(). */
+    private boolean corruptKineticStatePending;
 
     protected KineticMachineBlockEntity(BlockEntityType<?> typeIn, BlockPos pos, BlockState state) {
         super(typeIn, pos, state);
@@ -178,15 +211,32 @@ public class KineticMachineBlockEntity extends KineticBlockEntity implements IMa
     public void onLoad() {
         super.onLoad();
         metaMachine.onLoad();
-        if (!level.isClientSide && getDefinition().isSource() && workingSpeed != 0 &&
-                metaMachine instanceof KineticPartMachine) {
-            // 方案 B：保留 NBT 里持久化的 Create 动能状态（speed/source/network），
-            // 由 Create 的 initialize()/attachKinetics() 自行恢复原网络，
-            // 避免进游戏后应力网络失去源而整体崩溃。
-            // 宽限期只负责在 GTCEu 异步重检成型（约 1~1.5s）期间对源保持乐观判定。
-            graceActive = true;
-            graceTicks = GRACE_TICKS;
-            reActivateSource = true;
+        if (!level.isClientSide) {
+            float maxRotationSpeed = AllConfigs.server().kinetics.maxRotationSpeed.get();
+            boolean corruptNetworkState = corruptKineticStatePending || !Float.isFinite(this.speed) ||
+                    !Float.isFinite(capacity) || !Float.isFinite(stress) || !Float.isFinite(lastCapacityProvided) ||
+                    !Float.isFinite(lastStressApplied);
+            boolean restoredSpeedOutOfRange = Math.abs(this.speed) > maxRotationSpeed ||
+                    Math.abs(appliedGeneratedSpeed) > maxRotationSpeed;
+            if (getDefinition().isSource() && (corruptNetworkState || restoredSpeedOutOfRange)) {
+                // Invalid saved source state must not enter propagation or KineticNetwork's unloaded aggregate.
+                // Discard only this block entity's membership, then rebuild it from the clamped desired speed after
+                // initialize. This also prevents a neighbour that ticks first from seeing an over-speed source.
+                clearKineticInformation();
+                appliedGeneratedSpeed = 0.0F;
+                preAttachReconciliationPending = true;
+                reActivateSource = true;
+                sourceReconcilePending = true;
+            }
+            corruptKineticStatePending = false;
+            if (getDefinition().isSource() &&
+                    (hasNetwork() || hasSource() || getTheoreticalSpeed() != 0.0F || workingSpeed != 0.0F ||
+                            appliedGeneratedSpeed != 0.0F)) {
+                // tick() reconciles only after KineticBlockEntity.initialize() has restored this member and the
+                // aggregate contribution of still-unloaded members from NBT.
+                reActivateSource = true;
+                sourceReconcilePending = true;
+            }
         }
     }
 
@@ -236,9 +286,11 @@ public class KineticMachineBlockEntity extends KineticBlockEntity implements IMa
         if (getDefinition().isSource() && isValidOutputSource()) {
             float speed = Math.min(AllConfigs.server().kinetics.maxRotationSpeed.get(),
                     su / getDefinition().getTorque());
-            if (!simulate) {
+            if (!simulate && Float.compare(workingSpeed, speed) != 0) {
                 workingSpeed = speed;
                 reActivateSource = true;
+                sourceReconcilePending = true;
+                setChanged();
             }
             return speed * getDefinition().getTorque();
         }
@@ -250,40 +302,46 @@ public class KineticMachineBlockEntity extends KineticBlockEntity implements IMa
     }
 
     public void stopWorking() {
-        if (getDefinition().isSource() && workingSpeed != 0) {
+        if (getDefinition().isSource() &&
+                (workingSpeed != 0 || appliedGeneratedSpeed != 0 || generatedSourceSuspended)) {
             workingSpeed = 0;
+            generatedSourceSuspended = false;
             reActivateSource = true;
+            sourceReconcilePending = true;
+            setChanged();
         }
+    }
+
+    /**
+     * Pause or resume the applied Create source without discarding the recipe's desired speed. This transition is
+     * reconciled after the current MetaMachine tick, preserving Create's initialize/addSilently accounting order.
+     */
+    public void setGeneratedSourceSuspended(boolean suspended) {
+        if (!getDefinition().isSource() || generatedSourceSuspended == suspended) {
+            return;
+        }
+        generatedSourceSuspended = suspended;
+        reActivateSource = true;
+        sourceReconcilePending = true;
+        setChanged();
+    }
+
+    public boolean isGeneratedSourceSuspended() {
+        return generatedSourceSuspended;
     }
 
     @Override
     public float getGeneratedSpeed() {
-        return isValidOutputSource() ? workingSpeed : 0;
+        return appliedGeneratedSpeed;
     }
 
-    public boolean isGraceActive() {
-        return graceActive;
-    }
-
-    /**
-     * 宽限期内乐观信任持久化的 workingSpeed，避免重载后 GTCEu 异步重检成型完成前
-     * 应力网络短暂失去源；重检结束后立即恢复严格判定。
-     */
     private boolean isValidOutputSource() {
-        if (graceActive) {
-            return true;
-        }
-        // 只有应力输出部件需要按成型状态门控：未成型时不得继续充当网络源。
         return !(metaMachine instanceof KineticPartMachine) || isKineticPartFormed();
     }
 
     private boolean isKineticPartFormed() {
         return metaMachine instanceof KineticPartMachine kineticPartMachine &&
                 kineticPartMachine.isValidOutputBinding();
-    }
-
-    protected void notifyStressCapacityChange(float capacity) {
-        this.getOrCreateNetwork().updateCapacityFor(this, capacity);
     }
 
     public void removeSource() {
@@ -305,30 +363,25 @@ public class KineticMachineBlockEntity extends KineticBlockEntity implements IMa
     }
 
     public void tick() {
-        if (!level.isClientSide && getDefinition().isSource()) {
-            tickGracePeriod();
-            // workingSpeed 是 @DescSynced 服务器权威字段，客户端不允许本地写：
-            // 客户端写会污染同步值，且服务端值不变时不会重发，可能把转速卡在 0。
-            if (!isValidOutputSource()) {
-                stopWorking();
-            }
+        if (!level.isClientSide && (preAttachReconciliationPending || sourceReconcilePending)) {
+            // A finite old source contribution must reach initialize()/addSilently() before it is replaced; corrupt
+            // membership was scrubbed in onLoad(). A normal restored source is also held until Create has accounted
+            // its persisted membership through initialize()/addSilently().
+            updateSpeed = false;
         }
         super.tick();
-        if (getDefinition().isSource() && reActivateSource) {
-            updateGeneratedRotation();
-            reActivateSource = false;
-        }
-    }
-
-    /**
-     * 重载宽限期倒计时：异步重检已成型则提前结束，超时则按未成型处理（由 tick 停机）。
-     */
-    private void tickGracePeriod() {
-        if (!graceActive) {
+        if (level.isClientSide) {
             return;
         }
-        if (--graceTicks <= 0 || isKineticPartFormed()) {
-            graceActive = false;
+        if (getDefinition().isSource() && (reActivateSource || sourceReconcilePending)) {
+            // MetaMachine ticks before its holder, so all requests made during the current GT tick are coalesced into
+            // one topology update after Create's first-tick network restoration. A stable restored source stays in its
+            // existing network so KineticNetwork's aggregate state for still-unloaded members is preserved.
+            reActivateSource = false;
+            sourceReconcilePending = false;
+            boolean forceTopologyRebuild = preAttachReconciliationPending;
+            preAttachReconciliationPending = false;
+            updateGeneratedRotation(forceTopologyRebuild);
         }
     }
 
@@ -363,37 +416,139 @@ public class KineticMachineBlockEntity extends KineticBlockEntity implements IMa
      * 只允许服务器侧更新转速与应力网络：客户端由 @DescSynced 同步显示，不做本地写。
      */
     public void updateGeneratedRotation() {
+        updateGeneratedRotation(false);
+    }
+
+    private void updateGeneratedRotation(boolean forceTopologyRebuild) {
         if (!getDefinition().isSource() || level == null || level.isClientSide) {
             return;
         }
-        float speed = this.getGeneratedSpeed();
-        float prevSpeed = this.speed;
-        if (prevSpeed != speed) {
-            if (!this.hasSource()) {
-                IRotate.SpeedLevel levelBefore = IRotate.SpeedLevel.of(this.speed);
-                IRotate.SpeedLevel levelAfter = IRotate.SpeedLevel.of(speed);
-                if (levelBefore != levelAfter) {
-                    this.effects.queueRotationIndicators();
-                }
-            }
-            this.applyNewSpeed(prevSpeed, speed);
+        float maxRotationSpeed = AllConfigs.server().kinetics.maxRotationSpeed.get();
+        float desiredSpeed = Float.isFinite(workingSpeed) ?
+                Math.max(-maxRotationSpeed, Math.min(maxRotationSpeed, workingSpeed)) : 0.0F;
+        if (desiredSpeed != workingSpeed) {
+            workingSpeed = desiredSpeed;
         }
-        if (this.hasNetwork() && speed != 0.0F) {
-            KineticNetwork network = this.getOrCreateNetwork();
-            this.notifyStressCapacityChange(this.calculateAddedStressCapacity());
-            this.getOrCreateNetwork().updateStressFor(this, this.calculateStressApplied());
-            network.updateStress();
+        float targetSpeed = generatedSourceSuspended ? 0.0F : desiredSpeed;
+
+        float previousActualSpeed = this.speed;
+        boolean remainsExternallyDriven = targetSpeed != 0.0F && hasSource() &&
+                Math.abs(previousActualSpeed) >= Math.abs(targetSpeed) &&
+                Math.signum(previousActualSpeed) == Math.signum(targetSpeed);
+        boolean stableGeneratedTopology = targetSpeed != 0.0F && !hasSource() && hasNetwork() &&
+                Float.compare(previousActualSpeed, targetSpeed) == 0;
+        boolean canRetuneGeneratedTopology = targetSpeed != 0.0F && !hasSource() && hasNetwork() &&
+                previousActualSpeed != 0.0F;
+        if (!forceTopologyRebuild && targetSpeed == 0.0F && hasSource()) {
+            // Keep the externally driven member in place, but remove its generator contribution while the old applied
+            // speed still identifies it as a source. Removing/re-adding the whole member would transiently orphan a
+            // partially loaded network, so only the source entry changes here.
+            replaceSourceContribution(0.0F);
+        } else if (!forceTopologyRebuild && (remainsExternallyDriven || stableGeneratedTopology)) {
+            replaceSourceContribution(targetSpeed);
+        } else if (canRetuneGeneratedTopology) {
+            retuneGeneratedTopology(targetSpeed);
+        } else {
+            rebuildGeneratedTopology(targetSpeed, forceTopologyRebuild);
         }
-        this.onSpeedChanged(prevSpeed);
+
+        refreshNetworkContributions();
+        if (Float.compare(previousActualSpeed, this.speed) != 0) {
+            this.onSpeedChanged(previousActualSpeed);
+        }
+        this.setChanged();
         this.sendData();
+    }
+
+    /**
+     * Atomically replaces only this member's source contribution while preserving its current external source and
+     * network membership. The old source entry is removed before {@link #appliedGeneratedSpeed} changes; the new value
+     * is visible before the entry is added again.
+     */
+    private void replaceSourceContribution(float targetSpeed) {
+        KineticNetwork network = hasNetwork() ? getOrCreateNetwork() : null;
+        if (network != null) {
+            network.sources.remove(this);
+        }
+        appliedGeneratedSpeed = targetSpeed;
+        if (network == null) {
+            return;
+        }
+        if (targetSpeed != 0.0F) {
+            network.updateCapacityFor(this, calculateAddedStressCapacity());
+        } else {
+            lastCapacityProvided = 0.0F;
+            network.updateCapacity();
+        }
+    }
+
+    /**
+     * Changes a running independent source without replacing its network object. Create stores the contributions of
+     * unloaded members only in that object, so clearing the network id here would discard their aggregate stress and
+     * capacity until every chunk happened to load again.
+     */
+    private void retuneGeneratedTopology(float targetSpeed) {
+        KineticNetwork network = getOrCreateNetwork();
+        detachKinetics();
+        network.sources.remove(this);
+        appliedGeneratedSpeed = targetSpeed;
+        setSpeed(targetSpeed);
+        network.updateCapacityFor(this, calculateAddedStressCapacity());
+        attachKinetics();
+    }
+
+    /**
+     * Rebuilds this block entity as an independent generator (or stops it). Detachment and old-network removal happen
+     * while the old applied speed is still visible. The target applied speed is published before joining a new network.
+     */
+    private void rebuildGeneratedTopology(float targetSpeed, boolean attachStoppedSource) {
+        KineticNetwork previousNetwork = hasNetwork() ? getOrCreateNetwork() : null;
+        if (previousNetwork != null) {
+            // Chunk unload deliberately leaves the old block-entity identity in Create's network. A newly loaded
+            // instance is added alongside it; force one identity cleanup before removing this instance, otherwise the
+            // target-zero path can strand a phantom source/member in an otherwise dead network.
+            previousNetwork.updateNetwork();
+        }
+        if (previousNetwork != null && appliedGeneratedSpeed == 0.0F) {
+            // Clean up a zero-valued stale source entry too; KineticNetwork.remove() only removes sources when
+            // isSource() is true.
+            previousNetwork.sources.remove(this);
+        }
+        if (this.speed != 0.0F) {
+            detachKinetics();
+        }
+        setNetwork(null);
+        source = null;
+        setSpeed(0.0F);
+
+        appliedGeneratedSpeed = targetSpeed;
+        if (targetSpeed == 0.0F) {
+            lastCapacityProvided = 0.0F;
+            if (attachStoppedSource) {
+                attachKinetics();
+            }
+            return;
+        }
+
+        setSpeed(targetSpeed);
+        setNetwork(createNetworkId());
+        attachKinetics();
+    }
+
+    private void refreshNetworkContributions() {
+        if (!hasNetwork()) {
+            return;
+        }
+        KineticNetwork network = getOrCreateNetwork();
+        if (appliedGeneratedSpeed != 0.0F) {
+            network.updateCapacityFor(this, calculateAddedStressCapacity());
+        }
+        network.updateStressFor(this, calculateStressApplied());
+        network.updateStress();
     }
 
     @Override
     public float calculateStressApplied() {
-        if (!isValidOutputSource()) {
-            this.lastStressApplied = 0;
-            return 0;
-        }
         float impact = (float) IBlockStressValues.getImpact(this.getStressConfigKey());
         this.lastStressApplied = impact;
         return impact;
@@ -401,66 +556,35 @@ public class KineticMachineBlockEntity extends KineticBlockEntity implements IMa
 
     @Override
     public float calculateAddedStressCapacity() {
-        if (!isValidOutputSource()) {
-            this.lastCapacityProvided = 0;
-            return 0;
-        }
         float capacity = (float) IBlockStressValues.getCapacity(this.getStressConfigKey());
         this.lastCapacityProvided = capacity;
         return capacity;
-    }
-
-    public void applyNewSpeed(float prevSpeed, float speed) {
-        if (speed == 0.0F) {
-            if (this.hasSource()) {
-                this.notifyStressCapacityChange(0.0F);
-                this.getOrCreateNetwork().updateStressFor(this, this.calculateStressApplied());
-            } else {
-                this.detachKinetics();
-                this.setSpeed(0.0F);
-                this.setNetwork(null);
-            }
-        } else if (prevSpeed == 0.0F) {
-            this.setSpeed(speed);
-            this.setNetwork(this.createNetworkId());
-            this.attachKinetics();
-        } else if (this.hasSource()) {
-            if (Math.abs(prevSpeed) >= Math.abs(speed) && Math.signum(prevSpeed) == Math.signum(speed)) {
-                return;
-            }
-            // 应力箱是 GT 驱动的多方块部件，方向冲突只会来自重载/未成型竞态，
-            // 不触发原版“反向即销毁”的保护，改为重新挂载以同步到新目标速度。
-            if (Math.abs(prevSpeed) >= Math.abs(speed) && !(metaMachine instanceof KineticPartMachine)) {
-                this.level.destroyBlock(this.worldPosition, true);
-                return;
-            }
-            this.detachKinetics();
-            this.setSpeed(speed);
-            this.source = null;
-            this.setNetwork(this.createNetworkId());
-            this.attachKinetics();
-        } else {
-            this.detachKinetics();
-            this.setSpeed(speed);
-            this.attachKinetics();
-        }
     }
 
     public Long createNetworkId() {
         return this.worldPosition.asLong();
     }
 
-    // @Override
-    // protected void write(CompoundTag compound, boolean clientPacket) {
-    // super.write(compound, clientPacket);
-    // compound.putFloat("workingSpeed", workingSpeed);
-    // }
-    //
-    // @Override
-    // protected void read(CompoundTag compound, boolean clientPacket) {
-    // super.read(compound, clientPacket);
-    // workingSpeed = compound.contains("workingSpeed") ? compound.getFloat("workingSpeed") : 0;
-    // }
+    @Override
+    public void saveCustomPersistedData(CompoundTag tag, boolean forDrop) {
+        IMachineBlockEntity.super.saveCustomPersistedData(tag, forDrop);
+        if (forDrop) {
+            // A picked-up or cloned output may retain inventory fields, but never a live network request/source state.
+            tag.remove(WORKING_SPEED_NBT_KEY);
+            tag.remove(APPLIED_SPEED_NBT_KEY);
+            tag.remove(SOURCE_SUSPENDED_NBT_KEY);
+        }
+    }
+
+    @Override
+    public void loadCustomPersistedData(CompoundTag tag) {
+        if (!Float.isFinite(workingSpeed)) workingSpeed = 0.0F;
+        if (!Float.isFinite(appliedGeneratedSpeed)) {
+            appliedGeneratedSpeed = 0.0F;
+            corruptKineticStatePending = true;
+        }
+        IMachineBlockEntity.super.loadCustomPersistedData(tag);
+    }
 
     @Override
     public ManagedFieldHolder getFieldHolder() {

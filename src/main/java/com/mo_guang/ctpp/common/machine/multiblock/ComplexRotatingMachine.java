@@ -47,7 +47,7 @@ public class ComplexRotatingMachine extends WorkableElectricMultiblockMachine
                 this.contraptionEntity.addAll(rotatingEntities.values());
             }
         }
-        this.rotatingSubs = this.subscribeServerTick(this::rotatingTick);
+        this.rotatingSubs = this.subscribeServerTick(rotatingSubs, this::rotatingTick);
     }
 
     @Override
@@ -55,8 +55,27 @@ public class ComplexRotatingMachine extends WorkableElectricMultiblockMachine
         super.onStructureInvalid();
         // disassemble and clear using interface helper
         clearAndDisassembleRotatingEntities();
+        unsubscribeRotatingTick();
+    }
+
+    @Override
+    protected void onStructureRevalidationChanged(boolean pending) {
+        super.onStructureRevalidationChanged(pending);
+        if (pending) {
+            unsubscribeRotatingTick();
+        }
+    }
+
+    @Override
+    public void onUnload() {
+        unsubscribeRotatingTick();
+        super.onUnload();
+    }
+
+    private void unsubscribeRotatingTick() {
         if (rotatingSubs != null) {
             unsubscribe(rotatingSubs);
+            rotatingSubs = null;
         }
     }
 
@@ -83,7 +102,7 @@ public class ComplexRotatingMachine extends WorkableElectricMultiblockMachine
     }
 
     public void rotatingTick() {
-        if (!isFormed || contraptionEntity == null || contraptionEntity.isEmpty()) {
+        if (!isStructureOperational() || contraptionEntity == null || contraptionEntity.isEmpty()) {
             return;
         }
 

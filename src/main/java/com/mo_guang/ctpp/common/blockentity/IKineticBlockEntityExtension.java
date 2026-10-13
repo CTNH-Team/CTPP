@@ -1,9 +1,10 @@
 package com.mo_guang.ctpp.common.blockentity;
 
+import net.minecraft.core.BlockPos;
+
 public interface IKineticBlockEntityExtension {
 
-    // 设置是否在多方块中的状态
-    void setCTNHInMultiblock(boolean inMultiblock);
+    void ctpp$claimMultiblockOwner(BlockPos controllerPos, long instanceId, float visualSpeed);
 
-    void setCTNHVisualSpeed(float speed);
+    void ctpp$releaseMultiblockOwner(BlockPos controllerPos, long instanceId);
 }
