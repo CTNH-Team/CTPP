@@ -50,10 +50,20 @@ public record TradeEntry(AEKey content, long price, TradeRestriction restriction
 
     /** Tooltip line: goods, unit price, direction and remaining quota. */
     public MutableComponent describe() {
+        return describe(price);
+    }
+
+    /**
+     * Same line, but quoting {@code chargedPrice} instead of the ticket's own.
+     * <p>
+     * The GUI resolves prices through {@link PriceResolver}, so what an entry reads as and what it actually costs
+     * stay in step once pricing stops being fixed.
+     */
+    public MutableComponent describe(long chargedPrice) {
         return entry_desc.translate(
                 content.getDisplayName(),
-                CurrencyUtil.format(price),
-                isFluid() ? entry_per_bucket : entry_per_item,
+                CurrencyUtil.format(chargedPrice),
+                isFluid() ? entry_per_bucket.translate() : entry_per_item.translate(),
                 restrictionName(),
                 remainingTrades < 0 ? entry_unlimited.translate() :
                         Component.literal(Integer.toString(remainingTrades)));
@@ -97,8 +107,13 @@ public record TradeEntry(AEKey content, long price, TradeRestriction restriction
         return UNIT_AMOUNT;
     }
 
-    /** The price of one trade, i.e. the price of a single item or a single mB. */
-    public long tradePrice() {
+    /**
+     * The price written on the ticket itself, for one item or one millibucket.
+     * <p>
+     * This is the <em>asking</em> price, not necessarily what a trade settles at — {@link PriceResolver} decides
+     * that, so a market-wide pricing model can override what a ticket asks for.
+     */
+    public long ticketPrice() {
         return price;
     }
 

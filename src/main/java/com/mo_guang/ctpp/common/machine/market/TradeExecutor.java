@@ -2,8 +2,7 @@ package com.mo_guang.ctpp.common.machine.market;
 
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.items.IItemHandler;
-import net.minecraftforge.items.IItemHandlerModifiable;
+import net.minecraft.world.level.Level;
 
 import com.ctnhlang.CN;
 import com.ctnhlang.Category;
@@ -13,7 +12,13 @@ import tech.vixhentx.mcmod.ctnhlib.langprovider.Lang;
 
 import java.util.List;
 
-/** Settles one line of one ticket against the machine's goods and purse. Stateless. */
+/**
+ * Settles one line of one ticket against the machine's goods and money. Stateless.
+ * <p>
+ * Money is handled purely as a number here: the caller absorbs its purse into a balance before calling and projects
+ * that balance back into coins afterwards. Trading therefore never reads or writes coin slots, which is what keeps
+ * a settlement from losing money it has already paid out.
+ */
 @Prefix("market")
 @Category("machine")
 public final class TradeExecutor {
@@ -52,13 +57,25 @@ public final class TradeExecutor {
     @EN("Needs input: Stress")
     private static Lang status_no_stress;
 
-    @CN("金钱缓存已满")
-    @EN("Money buffer full")
-    private static Lang status_money_buffer_full;
-
     @CN("当前条件下无法交易")
     @EN("This trade is blocked")
     private static Lang status_blocked;
+
+    /**
+     * Outcome of a trade attempt, plus the machine's balance afterwards.
+     * <p>
+     * Successes carry the new balance; failures carry the balance unchanged so the caller can apply it blindly.
+     */
+    public record Attempt(Result result, long storedBalance) {
+
+        static Attempt of(Result result, long stored) {
+            return new Attempt(result, stored);
+        }
+
+        public boolean isSuccess() {
+            return result == Result.SUCCESS;
+        }
+    }
 
     /** Outcome of a trade attempt. */
     public enum Result {
@@ -79,8 +96,6 @@ public final class TradeExecutor {
         NO_EU,
         /** A kinetic machine has no live, turning Create network. */
         NO_STRESS,
-        /** The internal money buffer is full; selling stops. */
-        MONEY_BUFFER_FULL,
         /** This line could not trade in either allowed direction. */
         BLOCKED;
 
@@ -95,7 +110,6 @@ public final class TradeExecutor {
                 case NO_SPACE_FOR_GOODS -> status_no_space_for_goods.translate();
                 case NO_EU -> status_no_eu.translate();
                 case NO_STRESS -> status_no_stress.translate();
-                case MONEY_BUFFER_FULL -> status_money_buffer_full.translate();
                 case BLOCKED -> status_blocked.translate();
             };
         }
@@ -104,14 +118,40 @@ public final class TradeExecutor {
     /**
      * Settles the first ticket line that can trade.
      *
-     * @param ticketStack     mutated on success; write it back to the originating slot
-     * @param moneyBufferFull blocks selling only, since buying spends coins back out of the purse
+     * @param ticketStack mutated on success; write it back to the originating slot
+     * @param goods       the bin trades read from and write to
+     * @param stored      the machine's money, already including anything its coin slots held
+     * @param prices      resolves what each line actually charges, so pricing stays swappable
+     * @param level       the machine's level, passed through to the resolver; may be null
+     * @return the outcome, with {@link Attempt#storedBalance()} holding the new balance on success
      */
-    public static Result tryTrade(ItemStack ticketStack, GoodsAccess goods, IItemHandler money,
-                                  boolean moneyBufferFull) {
+    public static Attempt tryTrade(ItemStack ticketStack, GoodsAccess goods, long stored,
+                                   PriceResolver prices, Level level) {
+        return tryTrade(ticketStack, goods, stored, prices, level, false);
+    }
+
+    /**
+     * Reports whether this ticket could settle right now, without settling it.
+     * <p>
+     * The machine uses this to decide whether to charge up a trade at all: without it the progress bar would fill
+     * against work that cannot be done, then snap back to empty and start over.
+     *
+     * @return {@link Result#SUCCESS} if a line would settle, otherwise why none would
+     */
+    public static Result probe(ItemStack ticketStack, GoodsAccess goods, long stored,
+                               PriceResolver prices, Level level) {
+        return tryTrade(ticketStack, goods, stored, prices, level, true).result();
+    }
+
+    /**
+     * @param simulate when true, report what would happen without moving goods or spending quota; the returned
+     *                 balance is the one a real trade would leave
+     */
+    public static Attempt tryTrade(ItemStack ticketStack, GoodsAccess goods, long stored,
+                                   PriceResolver prices, Level level, boolean simulate) {
         List<TradeEntry> entries = MarketTicket.getEntries(ticketStack);
         if (entries.isEmpty()) {
-            return Result.NO_ENTRIES;
+            return Attempt.of(Result.NO_ENTRIES, stored);
         }
         Result last = Result.EXHAUSTED;
         for (int index = 0; index < entries.size(); index++) {
@@ -120,87 +160,57 @@ public final class TradeExecutor {
                 continue;
             }
             // Selling is tried first: it costs stock, not coins.
-            Result result = moneyBufferFull ? Result.BLOCKED : trySell(entry, goods, money);
-            if (result == Result.BLOCKED) {
-                result = tryBuy(entry, goods, money);
+            Attempt attempt = trySell(entry, goods, stored, prices, level, simulate);
+            if (attempt.result() == Result.BLOCKED) {
+                attempt = tryBuy(entry, goods, stored, prices, level, simulate);
             }
-            if (result == Result.BLOCKED) {
-                last = moneyBufferFull ? Result.MONEY_BUFFER_FULL : Result.BLOCKED;
+            if (attempt.result() == Result.BLOCKED) {
+                last = Result.BLOCKED;
                 continue;
             }
-            if (result == Result.SUCCESS) {
+            if (attempt.isSuccess() && !simulate) {
                 commitQuota(ticketStack, index, entry);
             }
-            return result;
+            return attempt;
         }
-        return last;
+        return Attempt.of(last, stored);
     }
 
-    /** SELL: goods out, coins in. The purse must have room before stock moves. */
-    private static Result trySell(TradeEntry entry, GoodsAccess goods, IItemHandler money) {
+    /** SELL: goods out, money in. */
+    private static Attempt trySell(TradeEntry entry, GoodsAccess goods, long stored,
+                                   PriceResolver prices, Level level, boolean simulate) {
         if (!entry.restriction().allowsSell()) {
-            return Result.BLOCKED;
+            return Attempt.of(Result.BLOCKED, stored);
         }
         long amount = entry.tradeAmount();
-        long price = entry.tradePrice();
-        if (goods.count(entry.content()) < amount) {
-            return Result.MACHINE_OUT_OF_STOCK;
-        }
-        if (CurrencyUtil.deposit(money, price, true) > 0) {
-            return Result.MACHINE_CANNOT_PAY;
-        }
-        long extracted = goods.extract(entry.content(), amount, false);
+        long extracted = goods.extract(entry.content(), amount, true);
         if (extracted < amount) {
-            return Result.MACHINE_OUT_OF_STOCK;
+            return Attempt.of(Result.MACHINE_OUT_OF_STOCK, stored);
         }
-        CurrencyUtil.deposit(money, price, false);
-        return Result.SUCCESS;
+        if (!simulate) {
+            goods.extract(entry.content(), amount, false);
+        }
+        return Attempt.of(Result.SUCCESS, stored + prices.buyPrice(level, entry));
     }
 
-    /** BUY: goods in, coins out. Balance and receiving space are both checked first. */
-    private static Result tryBuy(TradeEntry entry, GoodsAccess goods, IItemHandler money) {
+    /** BUY: goods in, money out. Stock space and funds are both checked before anything moves. */
+    private static Attempt tryBuy(TradeEntry entry, GoodsAccess goods, long stored,
+                                  PriceResolver prices, Level level, boolean simulate) {
         if (!entry.restriction().allowsBuy()) {
-            return Result.BLOCKED;
+            return Attempt.of(Result.BLOCKED, stored);
         }
         long amount = entry.tradeAmount();
-        long price = entry.tradePrice();
-        if (CurrencyUtil.getBalance(money) < price) {
-            return Result.MACHINE_CANNOT_PAY;
+        long price = prices.sellPrice(level, entry);
+        if (stored < price) {
+            return Attempt.of(Result.MACHINE_CANNOT_PAY, stored);
         }
         if (goods.insert(entry.content(), amount, true) < amount) {
-            return Result.NO_SPACE_FOR_GOODS;
+            return Attempt.of(Result.NO_SPACE_FOR_GOODS, stored);
         }
-        List<CurrencyUtil.CoinStack> plan = CurrencyUtil.planPayment(money, price);
-        if (plan == null || !(money instanceof IItemHandlerModifiable modifiable)) {
-            return Result.MACHINE_CANNOT_PAY;
+        if (!simulate) {
+            goods.insert(entry.content(), amount, false);
         }
-        long paid = CurrencyUtil.withdraw(modifiable, plan);
-        if (paid != price) {
-            // Coins changed between planning and withdrawal; put back what we took and bail out.
-            refund(modifiable, paid);
-            return Result.MACHINE_CANNOT_PAY;
-        }
-        long received = goods.insert(entry.content(), amount, false);
-        if (received < amount) {
-            refund(modifiable, paid);
-            return Result.NO_SPACE_FOR_GOODS;
-        }
-        return Result.SUCCESS;
-    }
-
-    /**
-     * Returns coins to the purse.
-     * <p>
-     * Every caller only reaches this after proving the purse had room for the same amount, so a shortfall means
-     * the purse was mutated underneath us and the value is now unrecoverable. Failing loudly beats silently
-     * deleting the player's money.
-     */
-    private static void refund(IItemHandlerModifiable money, long amount) {
-        long leftover = CurrencyUtil.deposit(money, amount, false);
-        if (leftover > 0) {
-            throw new IllegalStateException(
-                    "Market purse could not take back " + leftover + " nuggets of change; refusing to lose value");
-        }
+        return Attempt.of(Result.SUCCESS, stored - price);
     }
 
     /** Decrements the quota; a negative count means unlimited. */

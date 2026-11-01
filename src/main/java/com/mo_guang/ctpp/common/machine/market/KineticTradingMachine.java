@@ -41,6 +41,8 @@ public class KineticTradingMachine extends TradingMachine implements IKineticMac
     private static final float STRESS_PER_TRADE = 64.0f;
     /** How many ticks the stress stays applied after a trade settles. */
     private static final int STRESS_DURATION = 40;
+    /** Shaft speed that yields the base trade rate. */
+    private static final float NOMINAL_RPM = 256.0f;
 
     private int stressTicks;
 
@@ -64,6 +66,16 @@ public class KineticTradingMachine extends TradingMachine implements IKineticMac
     @Override
     protected TradeExecutor.Result powerFailure() {
         return TradeExecutor.Result.NO_STRESS;
+    }
+
+    /**
+     * Trade rate follows shaft speed, so gearing the shop faster is how you make it faster. 256 RPM is treated as
+     * the reference speed; below that it trades proportionally slower.
+     */
+    @Override
+    protected double tradesPerTick() {
+        float speed = Math.abs(getKineticHolder().getSpeed());
+        return TRADES_PER_TICK * Math.max(0.0f, speed / NOMINAL_RPM);
     }
 
     /**

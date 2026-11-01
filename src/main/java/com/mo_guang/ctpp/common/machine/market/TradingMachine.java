@@ -56,8 +56,10 @@ public class TradingMachine extends TieredEnergyMachine implements IFancyUIMachi
     public static final int MONEY_SLOTS = 8;
     public static final int GOODS_TANK_CAPACITY = 16_000;
 
-    private static final int TRADE_INTERVAL = 20;
-    private static final int TRADES_PER_CYCLE = 16;
+    /** Base trading rate at LV, before the tier or shaft speed multiplies it. */
+    protected static final double TRADES_PER_TICK = 0.05;
+    /** Ceiling on banked trades, so a long idle stretch cannot be cashed in as a burst. */
+    private static final double MAX_TRADE_DEBT = 16.0;
 
     @Persisted
     @DescSynced
@@ -91,12 +93,23 @@ public class TradingMachine extends TieredEnergyMachine implements IFancyUIMachi
     @RequireRerender
     private GoodsIoMode fluidMode = GoodsIoMode.NONE;
 
+    /**
+     * Money the machine holds as a number, meaning the part its coin slots do <em>not</em> currently show.
+     * <p>
+     * This and the purse are disjoint halves of one balance, so {@link #getMoneyBalance()} is their sum. Keeping
+     * them separate is what lets a machine pay amounts smaller than its smallest coin, and what makes a purse of
+     * eight slots able to hold more than eight slots' worth.
+     */
+    @Persisted
+    @DescSynced
+    private long storedBalance;
+
     @Persisted
     @DescSynced
     private TradeExecutor.Result lastResult = TradeExecutor.Result.NO_ENTRIES;
+    /** Sub-trade remainder carried between ticks, so a slow machine still makes steady progress. */
     @Persisted
-    @DescSynced
-    private int tradeCooldown;
+    private double tradeDebt;
 
     /** Server-side only: ticket slot that settled last, or -1. */
     private int lastTicketSlot = -1;
@@ -142,31 +155,76 @@ public class TradingMachine extends TieredEnergyMachine implements IFancyUIMachi
         }
     }
 
+    /**
+     * Cashes the purse into the balance, trades, and redraws the purse.
+     * <p>
+     * Folding the purse in first is what lets a deposit be spent the tick it arrives and a purse of large coins
+     * make change; redrawing last means the coins on screen are always exactly what is left. Trading in between
+     * only ever touches the number.
+     */
     private void tickTrades() {
+        storedBalance = CurrencyUtil.total(moneyInventory.storage, storedBalance);
         tickAutoOutput();
-        if (tradeCooldown > 0) {
-            tradeCooldown--;
+        try {
+            advanceTrading();
+        } finally {
+            // Unconditional: the purse was folded into the balance above, so skipping this on any early exit would
+            // strand coins in the balance and make them vanish from the slots.
+            storedBalance = CurrencyUtil.project(moneyInventory.storage, storedBalance);
+        }
+    }
+
+    /** Charges up and settles trades, or reports why it cannot. Leaves the balance to {@link #tickTrades()}. */
+    private void advanceTrading() {
+        // Progress only accrues against a trade that could actually settle. Charging ahead whenever a ticket is
+        // merely present would let the bar fill against a shop with no stock or no money, then snap back empty and
+        // start over — the bar would spin without anything happening.
+        if (!canTrade()) {
+            tradeDebt = 0.0;
+            lastResult = powerFailure();
             return;
         }
-        tradeCooldown = TRADE_INTERVAL;
-        // A trade is 1 item or 1 mB, so settle several per cycle.
-        for (int i = 0; i < TRADES_PER_CYCLE; i++) {
+        TradeExecutor.Result ready = readiness();
+        if (ready != TradeExecutor.Result.SUCCESS) {
+            tradeDebt = 0.0;
+            lastResult = ready;
+            return;
+        }
+        // Carries the sub-trade remainder between ticks so a slow machine still makes steady progress instead of
+        // stalling at zero; a fast one simply banks more than it can spend in one tick.
+        tradeDebt = Math.min(tradeDebt + tradesPerTick(), MAX_TRADE_DEBT);
+        while (tradeDebt >= 1.0) {
+            tradeDebt -= 1.0;
             if (performTrade() != TradeExecutor.Result.SUCCESS) {
+                tradeDebt = 0.0;
                 break;
             }
         }
     }
 
+    /** How far the machine is toward its next trade, 0 to 1, for the GUI progress bar. */
+    public double getTradeProgress() {
+        return Math.min(1.0, Math.max(0.0, tradeDebt));
+    }
+
+    /**
+     * How many trades this machine settles per tick.
+     * <p>
+     * Electric machines scale with voltage tier and kinetic ones with shaft speed, so upgrading the power supply
+     * is what makes a shop faster — there is no fixed cadence to outgrow.
+     */
+    protected double tradesPerTick() {
+        return TRADES_PER_TICK * (1 << Math.max(0, tier - GTValues.LV));
+    }
+
     /** Runs one trade attempt across every ticket slot, stopping at the first success. */
     public TradeExecutor.Result performTrade() {
         lastTicketSlot = -1;
-        // A full purse is handled per sell in the executor; buying still works.
         if (!canTrade()) {
             lastResult = powerFailure();
             return lastResult;
         }
         TradeExecutor.Result overall = TradeExecutor.Result.NO_ENTRIES;
-        IItemHandler money = getMoneyHandler();
         for (int slot = 0; slot < ticketInventory.getSlots(); slot++) {
             ItemStack ticket = ticketInventory.getStackInSlot(slot);
             if (!MarketTicket.isTicket(ticket)) {
@@ -174,25 +232,56 @@ public class TradingMachine extends TieredEnergyMachine implements IFancyUIMachi
             }
             // Trade a copy, so a failed attempt leaves the stored ticket untouched.
             ItemStack working = ticket.copy();
-            TradeExecutor.Result result = TradeExecutor.tryTrade(working, getGoodsAccess(), money,
-                    isMoneyBufferFull());
-            if (result == TradeExecutor.Result.SUCCESS) {
+            TradeExecutor.Attempt attempt = TradeExecutor.tryTrade(working, getGoodsAccess(), storedBalance,
+                    getPriceResolver(), getLevel());
+            if (attempt.isSuccess()) {
                 // Quota lives in NBT; write the mutated copy back.
                 ticketInventory.setStackInSlot(slot, working);
+                storedBalance = attempt.storedBalance();
                 lastTicketSlot = slot;
-                lastResult = result;
+                lastResult = attempt.result();
                 afterTrade();
-                return result;
+                return lastResult;
             }
-            overall = result;
+            overall = attempt.result();
         }
         lastResult = overall;
         return overall;
     }
 
-    /** Whether the machine has power for another trade. A full purse is handled per sell in {@link TradeExecutor}. */
+    /** Whether the machine has power for another trade. */
     protected boolean canTrade() {
         return energyContainer.getEnergyStored() >= tradeCost();
+    }
+
+    /**
+     * Whether any ticket slot holds a line that could settle right now, and if not, the reason to report.
+     * <p>
+     * This is a dry run of the same search {@link #performTrade()} will do, so the answer cannot disagree with what
+     * a real attempt would find. It is what keeps the progress bar from filling against a shop that has no stock,
+     * no money, or no receipt worth trading.
+     *
+     * @return {@link TradeExecutor.Result#SUCCESS} when a trade is ready, otherwise why none is
+     */
+    protected TradeExecutor.Result readiness() {
+        TradeExecutor.Result blocker = null;
+        for (int slot = 0; slot < ticketInventory.getSlots(); slot++) {
+            ItemStack ticket = ticketInventory.getStackInSlot(slot);
+            if (!MarketTicket.isTicket(ticket)) {
+                continue;
+            }
+            TradeExecutor.Result result = TradeExecutor.probe(ticket, getGoodsAccess(), storedBalance,
+                    getPriceResolver(), getLevel());
+            if (result == TradeExecutor.Result.SUCCESS) {
+                return result;
+            }
+            // "Nothing to do here" is the fallback reason; anything else is a concrete blocker worth reporting.
+            if (blocker == null && result != TradeExecutor.Result.EXHAUSTED &&
+                    result != TradeExecutor.Result.NO_ENTRIES) {
+                blocker = result;
+            }
+        }
+        return blocker != null ? blocker : TradeExecutor.Result.EXHAUSTED;
     }
 
     /** Result reported when {@link #canTrade()} is false. */
@@ -200,9 +289,22 @@ public class TradingMachine extends TieredEnergyMachine implements IFancyUIMachi
         return TradeExecutor.Result.NO_EU;
     }
 
-    /** True when not even one more nugget fits in the purse. */
-    public boolean isMoneyBufferFull() {
-        return CurrencyUtil.deposit(moneyInventory.storage, 1L, true) > 0;
+    /** Total money held: the stored balance plus the coins on display in the purse. */
+    public long getMoneyBalance() {
+        return CurrencyUtil.total(moneyInventory.storage, storedBalance);
+    }
+
+    /** The part of the balance not currently shown as coins. */
+    public long getStoredBalance() {
+        return storedBalance;
+    }
+
+    /**
+     * How prices are decided. Fixed by default; a supply-and-demand model would replace this without touching the
+     * trade logic.
+     */
+    protected PriceResolver getPriceResolver() {
+        return PriceResolver.FIXED;
     }
 
     /** EU for one trade. */
@@ -350,10 +452,6 @@ public class TradingMachine extends TieredEnergyMachine implements IFancyUIMachi
 
     public int getLastTicketSlot() {
         return lastTicketSlot;
-    }
-
-    public long getMoneyBalance() {
-        return CurrencyUtil.getBalance(moneyInventory.storage);
     }
 
     //////////////////////////////////////

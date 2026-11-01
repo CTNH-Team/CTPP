@@ -7,6 +7,7 @@ import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ProgressTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ResourceTexture;
+import com.lowdragmc.lowdraglib.gui.widget.ProgressWidget;
 import com.lowdragmc.lowdraglib.gui.widget.TextTextureWidget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 
@@ -32,9 +33,9 @@ import java.util.function.Supplier;
  * The fancy machine shell gives the machine a 176x166 window and always reserves the bottom 86px for the player
  * inventory, so everything here has to fit inside a 176x80 panel.
  * <p>
- * The three functional areas are laid out as columns: tickets on the left with the purse beneath them, the goods
- * on the right with the machine's read-outs below. Slots reuse the stock GT slot texture so the screen sits
- * naturally beside the rest of GT's machines.
+ * The goods grid sits on top with the fluid tank beside it; the bottom row is the purse and its balance read-out on
+ * the left, GT's progress arrow in the middle, and the receipts on the right. Slots reuse the stock GT slot texture
+ * so the screen sits naturally beside the rest of GT's machines.
  */
 @Prefix("market")
 @Category("machine")
@@ -55,22 +56,27 @@ final class MarketUI {
     private static final int GOODS_Y = 4;
     private static final int GOODS_COLUMNS = 9;
 
-    private static final int TICKET_X = 4;
+    /** Nine slots need a 3x3 block. */
+    private static final int TICKET_X = 96;
     private static final int TICKET_Y = 58;
     private static final int TICKET_COLUMNS = 3;
 
-    /**
-     * Clear of the ticket block, which is nine columns wide. Eight slots are laid out 4x2 rather than 2x4 so the
-     * purse and the balance line both fit in the 54px the bottom row has to spare next to the tanks.
-     */
-    private static final int MONEY_X = 76;
+    /** Eight slots are laid out 4x2 rather than 2x4 so the balance line still fits underneath. */
+    private static final int MONEY_X = 4;
     private static final int MONEY_Y = 58;
     private static final int MONEY_COLUMNS = 4;
 
     /** Directly under the purse. */
-    private static final int READOUT_X = 76;
+    private static final int READOUT_X = 4;
     private static final int READOUT_Y = 96;
     private static final int READOUT_W = 88;
+
+    /** GT's arrow sheet is 20x40 with two 20x20 frames; drawing it at any other size stretches it. */
+    private static final int PROGRESS_W = 20;
+    private static final int PROGRESS_H = 20;
+    /** Exactly fills the 20px the purse (ends x 76) and the receipts (start x 96) leave between them. */
+    private static final int PROGRESS_X = 76;
+    private static final int PROGRESS_Y = 66;
 
     private static final int TANK_X = 168;
     private static final int TANK_Y = 4;
@@ -100,6 +106,14 @@ final class MarketUI {
                 TANK_X, TANK_Y, STEP, STEP * 2, true, true)
                 .setBackground(GuiTextures.FLUID_SLOT)
                 .setFillDirection(ProgressTexture.FillDirection.DOWN_TO_UP));
+
+        // GT's arrow progress bar sits between the purse and the receipts. The ResourceTexture constructor splits
+        // the 20x40 sheet into its dim and lit frames; drawing the sheet directly would squash both into one
+        // widget. The arrow painted in the texture points right, so it has to fill left-to-right: revealing it from
+        // the other side would show the head before the shaft and read as running backwards.
+        group.addWidget(new ProgressWidget(machine::getTradeProgress,
+                PROGRESS_X, PROGRESS_Y, PROGRESS_W, PROGRESS_H, GuiTextures.PROGRESS_BAR_ARROW)
+                .setFillDirection(ProgressTexture.FillDirection.LEFT_TO_RIGHT));
 
         group.addWidget(text(READOUT_X, READOUT_Y, READOUT_W, 0xFFC66D,
                 () -> gui_balance.translate(CurrencyUtil.format(machine.getMoneyBalance()))));
