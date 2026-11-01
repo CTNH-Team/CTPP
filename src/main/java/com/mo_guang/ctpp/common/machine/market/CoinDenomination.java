@@ -6,14 +6,8 @@ import net.minecraft.world.item.ItemStack;
 import com.mo_guang.ctpp.registry.CTPPMarketItems;
 
 /**
- * The currency ladder used by the CTPP market.
- * <p>
- * Every rank is worth exactly nine of the rank below it, so the whole ladder is a canonical base-9 numeral
- * system. That property is what lets {@link CurrencyUtil} break an arbitrary amount into exact change with a
- * greedy decomposition: a base-9 digit is at most 8, so a single stack always holds every coin of one rank.
- * <p>
- * Rank 0 is "one nugget", rank 1 is "one ingot" (9 nuggets), rank 2 is "one block" (9 ingots). The
- * nugget/ingot/block wording and the ○/◇/⬢ marks repeat every three ranks.
+ * Currency ladder: each rank is worth nine of the one below, so amounts decompose greedily into exact change.
+ * Rank 0 is a nugget, rank 1 an ingot, rank 2 a block; the terms and marks repeat every three ranks.
  */
 public enum CoinDenomination {
 
@@ -26,16 +20,12 @@ public enum CoinDenomination {
     NAQUADAH("naquadah_coin", "硅岩币", "Naquadah Coin"),
     NEUTRONIUM("neutronium_coin", "中子素币", "Neutronium Coin");
 
-    /** Coins are ordinary items; a full stack is 64. */
     public static final int MAX_STACK = 64;
 
     /** Marks repeat every three ranks: nugget ○, ingot ◇, block ⬢. */
     private static final String[] MARKS = { "○", "◇", "⬢" };
 
-    /*
-     * Tooltip colours, sampled from GT's own credit textures so a coin's tooltip matches the coin it describes:
-     * copper's warm orange, cupronickel's pale brass, and silver's cool white-grey.
-     */
+    // Sampled from GT's credit textures.
     public static final int COLOR_NUGGET = 0xE77C56;
     public static final int COLOR_INGOT = 0xD8B47D;
     public static final int COLOR_BLOCK = 0xD9D9FC;
@@ -82,11 +72,7 @@ public enum CoinDenomination {
         return MARKS[ordinal() % MARKS.length];
     }
 
-    /**
-     * Which of the three visible denominations this rank is worth, for colouring: ranks 0-2 are the copper nugget,
-     * the cupronickel ingot and the silver block, and everything above them inherits the same three colours so a
-     * gold coin still reads as "an ingot-ish amount".
-     */
+    /** Tooltip colour for this rank's tier. */
     public int getColour() {
         return switch (ordinal() % MARKS.length) {
             case 0 -> COLOR_NUGGET;
@@ -103,12 +89,7 @@ public enum CoinDenomination {
     public static final CoinDenomination INGOT = values()[1];
     public static final CoinDenomination BLOCK = values()[2];
 
-    /**
-     * The natural unit for a value: blocks from 81 nuggets up, ingots from 9, otherwise nuggets.
-     * <p>
-     * Thresholds are deliberately "1 block" and "1 ingot" rather than three-of-a-kind, so a value is always shown
-     * in the largest unit it can fill at least one whole unit of.
-     */
+    /** Largest unit the value fills at least one whole unit of. */
     public static CoinDenomination unitFor(long amount) {
         if (amount >= BLOCK.getValue()) {
             return BLOCK;

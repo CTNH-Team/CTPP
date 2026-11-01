@@ -1,16 +1,12 @@
 package com.mo_guang.ctpp.common.machine.market;
 
 /**
- * Behaviour of one goods channel (items or fluids) on its selected face.
- * <p>
- * The three values deliberately line up with GT's own io-config sprite sheet, which draws off / output / auto
- * thirds. {@link #AUTO_OUTPUT} keeps the machine's behaviour (push the internal stock out of that face) and
- * {@link #PROXY} replaces GT's third position with something the market needs: trade straight against the
- * neighbour's inventory, so a shop can be fed from a warehouse without the goods ever entering the machine.
+ * Per-face goods behaviour, matching the three thirds of GT's io-config sprites. {@link #PROXY} takes the place
+ * of GT's auto slot: it trades against the neighbouring inventory instead of the machine's own.
  */
 public enum GoodsIoMode {
 
-    /** No goods handling; the face is not the selected one for this channel. */
+    /** Not the selected face for this channel. */
     NONE,
     /** Push the machine's own goods out of the selected face. */
     AUTO_OUTPUT,
@@ -19,12 +15,12 @@ public enum GoodsIoMode {
 
     private static final GoodsIoMode[] CYCLE = { NONE, AUTO_OUTPUT, PROXY };
 
-    /** The next mode in the click cycle: none → auto output → proxy → none. */
+    /** Next mode in the click cycle. */
     public GoodsIoMode next() {
         return CYCLE[(ordinal() + 1) % CYCLE.length];
     }
 
-    /** Colour of the face highlight, matching GT's orange for item io and blue for fluid io. */
+    /** Face highlight colour. */
     public int highlightColour(boolean fluid) {
         return switch (this) {
             case NONE -> 0x00000000;

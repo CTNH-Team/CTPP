@@ -13,13 +13,7 @@ import tech.vixhentx.mcmod.ctnhlib.langprovider.Lang;
 import java.util.List;
 import java.util.Locale;
 
-/**
- * Builds coin tooltips.
- * <p>
- * The default line is the stack's worth in its <em>natural</em> unit — blocks from 81 nuggets up, ingots from 9,
- * nuggets below that — coloured to match the coin art (silver for blocks, cupronickel for ingots, copper for
- * nuggets). Holding shift swaps it for an exact breakdown in all three units, to one decimal place.
- */
+/** Coin tooltips: natural unit by default, all three units to one decimal on shift. */
 @Prefix("market")
 @Category("machine")
 public final class CoinTooltip {
@@ -32,18 +26,12 @@ public final class CoinTooltip {
     @EN("§7Hold Shift for all units")
     private static Lang hint;
 
-    /**
-     * The mark printed for a unit: ○ nugget, ◇ ingot, ⬢ block. These match the specification's notation exactly.
-     */
+    /** Nugget, ingot or block mark for a unit. */
     private static String markFor(CoinDenomination unit) {
         return unit.getMark();
     }
 
-    /*
-     * These take a pre-formatted String rather than a double: Component.translatable substitutes with
-     * String.format-style "%s" only and never interprets "%.1f", so a double would print all 17 of its
-     * significant digits. The caller rounds with trim() before translating.
-     */
+    // Take %s, not %.1f: Component.translatable never interprets format specifiers.
     @CN("%s 块")
     @EN("%s blocks")
     private static Lang row_block;
@@ -56,17 +44,12 @@ public final class CoinTooltip {
     @EN("%s nuggets")
     private static Lang row_nugget;
 
-    /** Nuggets in one block and in one ingot, for the shift breakdown. */
     private static final long PER_INGOT = 9L;
     private static final long PER_BLOCK = 81L;
 
     private CoinTooltip() {}
 
-    /**
-     * Appends the coin's lines.
-     *
-     * @param total nugget value of the whole stack
-     */
+    /** @param total nugget value of the whole stack */
     public static void append(List<Component> tooltip, long total, boolean shift) {
         if (total <= 0) {
             return;

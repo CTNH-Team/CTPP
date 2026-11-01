@@ -31,15 +31,8 @@ import tech.vixhentx.mcmod.ctnhlib.langprovider.Lang;
 import javax.annotation.ParametersAreNonnullByDefault;
 
 /**
- * The goods rows of the trading machine's directional setup screen.
- * <p>
- * This is a deliberate copy of GT's {@code AutoOutputItemConfigHandler} / {@code AutoOutputFluidConfigHandler}
- * pair, so the screen behaves exactly like a stock GT machine: two buttons, the left one for items and the right
- * one for fluids, and clicking a face in the preview pushes that face through the same cycle GT uses.
- * <p>
- * The difference is the third mode. GT cycles off → output → auto; here "auto" is replaced by {@code PROXY}, which
- * makes the trade itself read and write the neighbour's inventory instead of the machine's own stock. The button
- * art is GT's own three-way io sprite sheet, so the control reads identically.
+ * Goods io rows for the directional setup screen, mirroring GT's AutoOutput item/fluid handlers. The third mode is
+ * {@link GoodsIoMode#PROXY} rather than GT's auto.
  */
 @Prefix("market")
 @Category("machine")
@@ -55,6 +48,7 @@ public class MarketIoConfigHandler implements IDirectionalConfigHandler {
     private static final IGuiTexture TEXTURE_OUTPUT_FLUID = modeButton(GuiTextures.IO_CONFIG_FLUID_MODES_BUTTON, 1);
     private static final IGuiTexture TEXTURE_PROXY_FLUID = modeButton(GuiTextures.IO_CONFIG_FLUID_MODES_BUTTON, 2);
 
+    /** Mode icon over GT's button face, sliced from GT's three-way io sheet. */
     private static IGuiTexture modeButton(ResourceTexture sheet, int index) {
         return new GuiTextureGroup(GuiTextures.VANILLA_BUTTON, sheet.getSubTexture(0, index / 3f, 1, 1 / 3f));
     }
@@ -166,10 +160,7 @@ public class MarketIoConfigHandler implements IDirectionalConfigHandler {
         return ScreenSide.LEFT;
     }
 
-    /**
-     * Clicking a face in the 3D preview applies the channel matching the mouse button, exactly like GT: left for
-     * items, right for fluids.
-     */
+    /** Left-click selects the item channel, right-click the fluid channel. */
     @Override
     public void handleClick(ClickData clickData, Direction direction) {
         if (side == null || !side.equals(direction)) {

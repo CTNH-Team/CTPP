@@ -9,11 +9,8 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Reads, plans and moves CTPP coins inside an item handler.
- * <p>
- * All arithmetic is done in nuggets ({@link CoinDenomination#COPPER} units, i.e. 9^0). Because every rank is a
- * power of nine, a top-down greedy pass always terminates at an exact amount: the worst case just falls back to
- * nuggets, which are worth 1.
+ * Reads, plans and moves CTPP coins inside an item handler. All arithmetic is in nuggets; because every rank is a
+ * power of nine, a top-down greedy pass always reaches an exact amount.
  */
 public final class CurrencyUtil {
 

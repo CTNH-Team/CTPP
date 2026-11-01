@@ -13,13 +13,7 @@ import tech.vixhentx.mcmod.ctnhlib.langprovider.Lang;
 
 import java.util.List;
 
-/**
- * The transactional core of a trading machine: given a ticket stack and the machine's goods and purse, try to
- * settle one line of one ticket.
- * <p>
- * Every path runs simulate → check → commit, so a rejected trade never leaves the machine half paid. The class
- * holds no state; the caller owns the handlers and writes the mutated ticket back to its slot.
- */
+/** Settles one line of one ticket against the machine's goods and purse. Stateless. */
 @Prefix("market")
 @Category("machine")
 public final class TradeExecutor {
@@ -66,7 +60,7 @@ public final class TradeExecutor {
     @EN("This trade is blocked")
     private static Lang status_blocked;
 
-    /** What happened on the last attempt, for GUI and Jade feedback. */
+    /** Outcome of a trade attempt. */
     public enum Result {
 
         /** A trade was settled. */
@@ -85,12 +79,12 @@ public final class TradeExecutor {
         NO_EU,
         /** A kinetic machine has no live, turning Create network. */
         NO_STRESS,
-        /** The internal money buffer is full; the machine stops rather than accumulating more. */
+        /** The internal money buffer is full; selling stops. */
         MONEY_BUFFER_FULL,
         /** This line could not trade in either allowed direction. */
         BLOCKED;
 
-        /** Player-facing description, shown under the goods area. */
+        /** Player-facing description. */
         public MutableComponent describe() {
             return switch (this) {
                 case SUCCESS -> status_success.translate();
@@ -108,12 +102,10 @@ public final class TradeExecutor {
     }
 
     /**
-     * Attempts exactly one trade: the first ticket line that can settle wins.
+     * Settles the first ticket line that can trade.
      *
-     * @param ticketStack     mutated in place on success; write it back to the originating slot
-     * @param money           the machine's purse; coins only
-     * @param moneyBufferFull blocks the <em>sell</em> direction only. Buying spends coins out of the purse, so a
-     *                        full purse never prevents it — the machine can always buy its way back to free space
+     * @param ticketStack     mutated on success; write it back to the originating slot
+     * @param moneyBufferFull blocks selling only, since buying spends coins back out of the purse
      */
     public static Result tryTrade(ItemStack ticketStack, GoodsAccess goods, IItemHandler money,
                                   boolean moneyBufferFull) {
@@ -127,7 +119,7 @@ public final class TradeExecutor {
             if (!entry.hasQuotaLeft()) {
                 continue;
             }
-            // Selling is tried first: it costs the machine nothing but stock, and keeps the purse flowing.
+            // Selling is tried first: it costs stock, not coins.
             Result result = moneyBufferFull ? Result.BLOCKED : trySell(entry, goods, money);
             if (result == Result.BLOCKED) {
                 result = tryBuy(entry, goods, money);
@@ -144,9 +136,7 @@ public final class TradeExecutor {
         return last;
     }
 
-    /**
-     * SELL: goods leave the machine, coins come in. The purse must have room for the payment before stock moves.
-     */
+    /** SELL: goods out, coins in. The purse must have room before stock moves. */
     private static Result trySell(TradeEntry entry, GoodsAccess goods, IItemHandler money) {
         if (!entry.restriction().allowsSell()) {
             return Result.BLOCKED;
@@ -161,17 +151,13 @@ public final class TradeExecutor {
         }
         long extracted = goods.extract(entry.content(), amount, false);
         if (extracted < amount) {
-            // Nothing should have moved on a failed extract, but guard anyway.
             return Result.MACHINE_OUT_OF_STOCK;
         }
         CurrencyUtil.deposit(money, price, false);
         return Result.SUCCESS;
     }
 
-    /**
-     * BUY: goods come in, coins leave. Both the purse balance and the receiving space are checked up front so the
-     * payment and the delivery always match.
-     */
+    /** BUY: goods in, coins out. Balance and receiving space are both checked first. */
     private static Result tryBuy(TradeEntry entry, GoodsAccess goods, IItemHandler money) {
         if (!entry.restriction().allowsBuy()) {
             return Result.BLOCKED;
@@ -217,9 +203,7 @@ public final class TradeExecutor {
         }
     }
 
-    /**
-     * Decrements the ticket line's quota. A negative count means unlimited and is left alone.
-     */
+    /** Decrements the quota; a negative count means unlimited. */
     private static void commitQuota(ItemStack ticketStack, int index, TradeEntry entry) {
         int remaining = entry.remainingTrades();
         if (remaining > 0) {

@@ -2,15 +2,16 @@ package com.mo_guang.ctpp.common.machine.market;
 
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
 import com.gregtechceu.gtceu.api.gui.widget.SlotWidget;
-import com.gregtechceu.gtceu.api.gui.widget.TankWidget;
 
 import com.lowdragmc.lowdraglib.gui.texture.GuiTextureGroup;
 import com.lowdragmc.lowdraglib.gui.texture.IGuiTexture;
+import com.lowdragmc.lowdraglib.gui.texture.ProgressTexture;
 import com.lowdragmc.lowdraglib.gui.texture.ResourceTexture;
 import com.lowdragmc.lowdraglib.gui.widget.TextTextureWidget;
 import com.lowdragmc.lowdraglib.gui.widget.WidgetGroup;
 
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.items.IItemHandlerModifiable;
 
 import com.ctnhlang.CN;
@@ -18,8 +19,11 @@ import com.ctnhlang.Category;
 import com.ctnhlang.EN;
 import com.ctnhlang.Prefix;
 import com.mo_guang.ctpp.CTPP;
+import com.mo_guang.ctpp.client.MarketSlotWidget;
+import com.mo_guang.ctpp.client.MarketTankWidget;
 import tech.vixhentx.mcmod.ctnhlib.langprovider.Lang;
 
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -43,46 +47,37 @@ final class MarketUI {
     /** One slot plus its border, matching {@link GuiTextures#SLOT}. */
     private static final int STEP = 18;
 
-    /*
-     * Budget: the fancy shell hands the machine a 176x166 window and keeps the bottom 86px for the player
-     * inventory, so usable content is 176x80.
-     *
-     * Three non-overlapping regions:
-     *
-     * x: 4 76 80 152 154 172
-     * +-----------+ +---------------------+ +------+
-     * y: 4 | tickets | | goods 4x3 | | tank |
-     * | 4x2 | | | | |
-     * 40 +-----------+ +---------------------+ +------+
-     * | purse 4x2 | | balance / status row over the full width |
-     * 76 +-----------+ +------------------------------------------+
-     *
-     * The tank columns are 4 slots wide on purpose: a 4x4 goods grid plus a tank plus the read-outs does not fit
-     * in 176px, so goods carry 12 slots and the read-outs get a full-width strip underneath instead.
-     */
-    private static final int TICKET_X = 4;
-    private static final int TICKET_Y = 4;
-    private static final int MONEY_X = 4;
-    private static final int MONEY_Y = 40;
-    private static final int GOODS_X = 80;
+    // Larger than the default 176x166 machine window, so the player inventory is pushed below the content.
+    static final int PAGE_WIDTH = 190;
+    static final int PAGE_HEIGHT = 112;
+
+    private static final int GOODS_X = 4;
     private static final int GOODS_Y = 4;
-    private static final int GOODS_COLUMNS = 4;
-    private static final int TANK_X = 154;
+    private static final int GOODS_COLUMNS = 9;
 
-    private static final int READOUT_X = 80;
-    private static final int READOUT_Y = 62;
-    private static final int READOUT_W = 90;
+    private static final int TICKET_X = 4;
+    private static final int TICKET_Y = 58;
+    private static final int TICKET_COLUMNS = 3;
 
-    /** Tickets and the purse are four wide. */
-    private static final int COLUMNS = 4;
+    /**
+     * Clear of the ticket block, which is nine columns wide. Eight slots are laid out 4x2 rather than 2x4 so the
+     * purse and the balance line both fit in the 54px the bottom row has to spare next to the tanks.
+     */
+    private static final int MONEY_X = 76;
+    private static final int MONEY_Y = 58;
+    private static final int MONEY_COLUMNS = 4;
+
+    /** Directly under the purse. */
+    private static final int READOUT_X = 76;
+    private static final int READOUT_Y = 96;
+    private static final int READOUT_W = 88;
+
+    private static final int TANK_X = 168;
+    private static final int TANK_Y = 4;
 
     private MarketUI() {}
 
-    /**
-     * Low-contrast watermarks so the three areas are distinguishable at a glance. Each one is an existing texture
-     * pushed through a desaturate-and-darken pass, so they match the item that belongs in the slot: a coin for the
-     * purse, an ingot for the goods, and paper for the tickets.
-     */
+    /** Faint slot watermarks identifying each area. */
     private static final ResourceTexture WATERMARK_TICKET = watermark("slot_ticket");
     private static final ResourceTexture WATERMARK_GOODS = watermark("slot_goods");
     private static final ResourceTexture WATERMARK_COIN = watermark("slot_coin");
@@ -92,14 +87,19 @@ final class MarketUI {
     }
 
     static void build(WidgetGroup group, TradingMachine machine) {
-        addSlotGrid(group, machine.ticketInventory.storage, TICKET_X, TICKET_Y, COLUMNS, WATERMARK_TICKET);
-        addSlotGrid(group, machine.moneyInventory.storage, MONEY_X, MONEY_Y, COLUMNS, WATERMARK_COIN);
-        addSlotGrid(group, machine.goodsInventory.storage, GOODS_X, GOODS_Y, GOODS_COLUMNS, WATERMARK_GOODS);
+        // Each grid claims its own kind so shift-click lands in the right region.
+        addSlotGrid(group, machine.goodsInventory.storage, GOODS_X, GOODS_Y, GOODS_COLUMNS, WATERMARK_GOODS,
+                MarketUI::isGoods);
+        addSlotGrid(group, machine.ticketInventory.storage, TICKET_X, TICKET_Y, TICKET_COLUMNS, WATERMARK_TICKET,
+                MarketTicket::isTicket);
+        addSlotGrid(group, machine.moneyInventory.storage, MONEY_X, MONEY_Y, MONEY_COLUMNS, WATERMARK_COIN,
+                CoinDenominationRegistry::isCoin);
 
-        // The fluid half of the goods area stands beside the item grid, two slots tall.
-        group.addWidget(new TankWidget(machine.goodsTank.getStorages()[0],
-                TANK_X, GOODS_Y, STEP, STEP * 2, true, true)
-                .setBackground(GuiTextures.FLUID_SLOT));
+        // setFillDirection is required: the default ALWAYS_FULL ignores the fill ratio.
+        group.addWidget(new MarketTankWidget(machine.goodsTank.getStorages()[0],
+                TANK_X, TANK_Y, STEP, STEP * 2, true, true)
+                .setBackground(GuiTextures.FLUID_SLOT)
+                .setFillDirection(ProgressTexture.FillDirection.DOWN_TO_UP));
 
         group.addWidget(text(READOUT_X, READOUT_Y, READOUT_W, 0xFFC66D,
                 () -> gui_balance.translate(CurrencyUtil.format(machine.getMoneyBalance()))));
@@ -107,7 +107,7 @@ final class MarketUI {
         // failure reads the same way it does on any other GT machine.
     }
 
-    /** Dynamic text; the supplier is re-evaluated every frame so synced state shows up live. */
+    /** Text re-evaluated every frame. */
     private static TextTextureWidget text(int x, int y, int width, int colour, Supplier<Component> supplier) {
         TextTextureWidget widget = new TextTextureWidget(x, y, width, 10);
         widget.setText(supplier);
@@ -115,24 +115,26 @@ final class MarketUI {
         return widget;
     }
 
+    /** Goods are anything that is neither a ticket nor a coin; those two have their own regions. */
+    private static boolean isGoods(ItemStack stack) {
+        return !MarketTicket.isTicket(stack) && !CoinDenominationRegistry.isCoin(stack);
+    }
+
+    /** @param shiftClickFilter what this region accepts from a shift-click; LowDragLib sorts destinations by index. */
     private static void addSlotGrid(WidgetGroup group, IItemHandlerModifiable handler, int x, int y, int columns,
-                                    ResourceTexture watermark) {
+                                    ResourceTexture watermark, Predicate<ItemStack> shiftClickFilter) {
         for (int index = 0; index < handler.getSlots(); index++) {
             int column = index % columns;
             int row = index / columns;
-            SlotWidget slot = new SlotWidget(handler, index, x + column * STEP, y + row * STEP, true, true);
+            SlotWidget slot = new MarketSlotWidget(handler, index, x + column * STEP, y + row * STEP,
+                    shiftClickFilter);
             slot.setBackground(slotBackground(watermark));
             group.addWidget(slot);
         }
     }
 
-    /**
-     * Slot frame, its darkened inner panel, and the area watermark on top of both.
-     * <p>
-     * The watermark is drawn last so it sits under the item but over the recess, and it is deliberately faint —
-     * it has to identify the area without competing with whatever the player has actually put in the slot.
-     */
+    /** Slot frame plus watermark; anything opaque over it would flatten the bevel. */
     private static IGuiTexture slotBackground(ResourceTexture watermark) {
-        return new GuiTextureGroup(GuiTextures.SLOT, GuiTextures.SLOT_DARKENED, watermark);
+        return new GuiTextureGroup(GuiTextures.SLOT, watermark);
     }
 }

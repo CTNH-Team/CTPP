@@ -18,14 +18,7 @@ import java.util.Locale;
 
 import javax.annotation.ParametersAreNonnullByDefault;
 
-/**
- * The stress-driven trading machine: instead of EU, every settled trade costs the Create network a chunk of
- * stress for a short while.
- * <p>
- * The machine has no internal energy buffer to drain, so it reports a temporary stress impact while it works.
- * That is what makes a shop run on windmills or water wheels, and it keeps the "one shop, one power source" idea
- * from the electric variants.
- */
+/** Trading machine driven by Create rotation; each settled trade bills the network. */
 @Prefix("market")
 @Category("machine")
 @ParametersAreNonnullByDefault
@@ -55,22 +48,13 @@ public class KineticTradingMachine extends TradingMachine implements IKineticMac
         super(holder, com.gregtechceu.gtceu.api.GTValues.LV);
     }
 
-    /**
-     * Only the back face carries a shaft.
-     * <p>
-     * Jack's model puts the shopfront on the front and a gearbox texture on the back, so the shaft has to enter
-     * from behind. The inherited rule ("any face sharing the rotation axis") would put a shaft through the
-     * shopfront as well, which rendered straight through the {@code $} sign.
-     */
+    /** Only the back face carries a shaft; the default rule would put one through the shopfront. */
     @Override
     public boolean hasShaftTowards(Direction face) {
         return face == getRotationFacing().getOpposite();
     }
 
-    /**
-     * A kinetic shop needs a live network that is actually turning; it has no EU buffer to draw from, so the
-     * inherited energy check would always fail.
-     */
+    /** Requires a live, turning network; the inherited EU check would always fail. */
     @Override
     protected boolean canTrade() {
         var holder = getKineticHolder();

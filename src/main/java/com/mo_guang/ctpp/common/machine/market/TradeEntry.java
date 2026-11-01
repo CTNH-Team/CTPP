@@ -15,12 +15,7 @@ import com.ctnhlang.Prefix;
 import org.jetbrains.annotations.Nullable;
 import tech.vixhentx.mcmod.ctnhlib.langprovider.Lang;
 
-/**
- * One immutable snapshot of a line item read out of a market ticket.
- * <p>
- * Tickets live in NBT, so every read hands back a fresh instance rather than a live view; mutating a ticket means
- * writing the entry back through {@link MarketTicket#updateEntry}.
- */
+/** Immutable snapshot of one ticket line. Mutate via {@link MarketTicket#updateEntry}. */
 @Prefix("market")
 @Category("machine")
 public record TradeEntry(AEKey content, long price, TradeRestriction restriction, int remainingTrades) {
@@ -53,12 +48,7 @@ public record TradeEntry(AEKey content, long price, TradeRestriction restriction
     @EN("unlimited")
     private static Lang entry_unlimited;
 
-    /**
-     * Short description for tooltips: the goods, the unit price, the allowed direction and the remaining quota.
-     * <p>
-     * The price is quoted per single item or per millibucket, and the quota counts trades, so the two agree: a
-     * quota of 40 at price 3 buys 40 items for 120.
-     */
+    /** Tooltip line: goods, unit price, direction and remaining quota. */
     public MutableComponent describe() {
         return entry_desc.translate(
                 content.getDisplayName(),
@@ -78,7 +68,7 @@ public record TradeEntry(AEKey content, long price, TradeRestriction restriction
         };
     }
 
-    /** A representative 16x16 icon for GUI slots; fluid keys render through AE2 instead. */
+    /** Item icon for GUI slots; fluids render through AE2. */
     @Nullable
     public ItemStack icon() {
         if (content instanceof AEItemKey itemKey) {
@@ -99,13 +89,7 @@ public record TradeEntry(AEKey content, long price, TradeRestriction restriction
         return new TradeEntry(content, price, restriction, remaining);
     }
 
-    /**
-     * The smallest goods unit this entry trades in: one item, or one millibucket of fluid.
-     * <p>
-     * Both are exactly 1, so the goods amount and the price are always in the same 1:1 unit — the ticket's
-     * {@code coin} value is literally "price per item" or "price per mB". Keeping the unit at 1 means a quota of
-     * {@code n} always buys exactly {@code n} items no matter what, with no rounding anywhere.
-     */
+    /** One item or one millibucket: price and amount share this 1:1 unit, so no rounding occurs. */
     public static final long UNIT_AMOUNT = 1L;
 
     /** How many goods one trade moves. */

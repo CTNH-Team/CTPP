@@ -12,15 +12,8 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * Atlas lookups for the trading machine's goods overlays.
- * <p>
- * All three sheets are GT's own art, so they are already stitched and need no registration.
- * <p>
- * {@code overlay_item_output} is a 16x96 animated sheet. Minecraft stitches an animated texture as a single
- * frame-sized tile and cycles the frames into it, so a quad baked against that sprite shows one frame at a time
- * rather than the whole strip. There is no supported way to pin it to frame zero through
- * {@code StaticFaceBakery}, so the still variant uses GT's dedicated static arrow
- * ({@code overlay_item_hatch_output}) instead — same visual language, genuinely non-animated.
+ * Atlas lookups for the goods overlays; all are GT's own art. The still variants use GT's static hatch arrows,
+ * since an animated sheet cannot be pinned to frame zero through StaticFaceBakery.
  */
 @OnlyIn(Dist.CLIENT)
 public final class MarketOverlaySprites {
@@ -42,16 +35,13 @@ public final class MarketOverlaySprites {
         return atlas == null ? null : atlas.apply(location);
     }
 
-    /** The socket plate every configured face gets, matching a GT machine's io overlay. */
+    /** Socket plate for configured faces. */
     @Nullable
     public static TextureAtlasSprite pipe() {
         return sprite(PIPE);
     }
 
-    /**
-     * @param proxy {@code true} for the flowing animation of a proxy face, {@code false} for the still arrow of a
-     *              plain auto-output face
-     */
+    /** @param proxy animated for a proxy face, still for auto-output */
     @Nullable
     public static TextureAtlasSprite itemOutput(boolean proxy) {
         return sprite(proxy ? ITEM_OUTPUT_ANIMATED : ITEM_OUTPUT_STATIC);

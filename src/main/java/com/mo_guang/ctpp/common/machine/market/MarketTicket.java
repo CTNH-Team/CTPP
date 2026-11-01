@@ -12,18 +12,12 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Static helpers for the market ticket item: a plain item whose only state is a list of {@link TradeEntry} in NBT.
- * <p>
- * Layout (the outer key keeps the spelling documented in the design brief):
+ * Ticket NBT helpers.
  *
  * <pre>
- * { "receite": { "entries": [ { "content": {...afeKey}, "coin": 7, "restriction": "buy_only",
+ * { "receite": { "entries": [ { "content": {...aeKey}, "coin": 7, "restriction": "buy_only",
  *                               "remaining_trade_count": 12 } ] } }
  * </pre>
- *
- * A single ticket can therefore carry several independent trade lines, each with its own price, direction and
- * quota. Ticketing is deliberately NBT-only: no capability, no registry entry per trade, and the machine only has
- * to write the stack back after it decrements a quota.
  */
 public final class MarketTicket {
 
@@ -38,11 +32,8 @@ public final class MarketTicket {
     }
 
     /**
-     * All readable entries, silently skipping malformed ones. Returns an immutable list.
-     * <p>
-     * Two shapes are accepted. The modern one nests an {@code entries} list, which is what a ticket with several
-     * trade lines needs. The compact one puts a single entry's fields straight under {@code receite}, matching the
-     * format in the original design notes, so hand-written or command-created tickets keep working.
+     * Readable entries; malformed ones are skipped. Accepts either an {@code entries} list or a single entry's
+     * fields written directly under {@code receite}.
      */
     public static List<TradeEntry> getEntries(ItemStack stack) {
         if (!stack.hasTag()) {
