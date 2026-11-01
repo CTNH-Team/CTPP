@@ -16,7 +16,10 @@ import static com.mo_guang.ctpp.CTPPRegistration.REGISTRATE;
 
 public class CTPPItems {
 
-    public static void init() {}
+    public static void init() {
+        // Coins and tickets register through their own holder; touching it here keeps the ordering explicit.
+        CTPPMarketItems.init();
+    }
 
     public static ItemEntry<Item> BASIC_MECHANISM = REGISTRATE.item("basic_mechanism", Item::new).cnlang("基础构件")
             .register();

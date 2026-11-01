@@ -42,8 +42,12 @@ public class SplitShaftVisual extends KineticBlockEntityVisual<KineticMachineBlo
 
             float splitSpeed = speed * (blockEntity.getMetaMachine() instanceof IKineticMachine kineticMachine ?
                     kineticMachine.getRotationSpeedModifier(dir) : 1);
-            half.setup(blockEntity, splitSpeed).setPosition(getVisualPosition()).rotateToFace(Direction.SOUTH, dir)
+            boolean visible = hasShaft(blockEntity, dir);
+            half.setup(blockEntity, splitSpeed)
+                    .setPosition(getVisualPosition()).rotateToFace(Direction.SOUTH, dir)
                     .setChanged();
+            // setVisible returns void, so it cannot join the builder chain.
+            half.setVisible(visible);
             keys.add(half);
         }
     }
@@ -56,13 +60,27 @@ public class SplitShaftVisual extends KineticBlockEntityVisual<KineticMachineBlo
         Direction[] directions = Iterate.directionsInAxis(boxAxis);
 
         for (int i : Iterate.zeroAndOne) {
-            keys.get(i)
-                    .setup(blockEntity,
-                            blockEntity.getSpeed() *
-                                    (blockEntity.getMetaMachine() instanceof IKineticMachine kineticMachine ?
-                                            kineticMachine.getRotationSpeedModifier(directions[i]) : 1))
-                    .setChanged();
+            Direction dir = directions[i];
+            float speed = blockEntity.getSpeed() *
+                    (blockEntity.getMetaMachine() instanceof IKineticMachine kineticMachine ?
+                            kineticMachine.getRotationSpeedModifier(dir) : 1);
+            RotatingInstance half = keys.get(i);
+            half.setup(blockEntity, speed).setChanged();
+            half.setVisible(hasShaft(blockEntity, dir));
         }
+    }
+
+    /**
+     * Whether the machine actually wants a shaft stub on this face.
+     * <p>
+     * A half shaft is instanced for both ends of the rotation axis, so a machine that takes rotation on only one
+     * side — the trading machine, whose gearbox is on the back — would otherwise show a stub straight through its
+     * front. Zero speed is not enough to hide it, because the geometry would still be drawn; the instance itself
+     * has to be made invisible.
+     */
+    private static boolean hasShaft(KineticMachineBlockEntity blockEntity, Direction dir) {
+        return !(blockEntity.getMetaMachine() instanceof IKineticMachine kineticMachine) ||
+                kineticMachine.hasShaftTowards(dir);
     }
 
     @Override

@@ -37,13 +37,13 @@ import com.mo_guang.ctpp.api.KineticMachineDefinition;
 import com.mo_guang.ctpp.client.CarbonBrushesRenderer;
 import com.mo_guang.ctpp.client.CarbonBrushesVisual;
 import com.mo_guang.ctpp.client.KineticMachineBlockEntityRenderer;
+import com.mo_guang.ctpp.client.SplitShaftVisual;
 import com.mo_guang.ctpp.common.machine.IKineticMachine;
 import com.mo_guang.ctpp.common.machine.multiblock.part.KineticPartMachine;
 import com.simibubi.create.content.kinetics.KineticNetwork;
 import com.simibubi.create.content.kinetics.base.IRotate;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.base.KineticEffectHandler;
-import com.simibubi.create.content.kinetics.base.SingleAxisRotatingVisual;
 import com.simibubi.create.foundation.utility.CreateLang;
 import com.simibubi.create.infrastructure.config.AllConfigs;
 import com.tterrag.registrate.util.OneTimeEventReceiver;
@@ -110,8 +110,12 @@ public class KineticMachineBlockEntity extends KineticBlockEntity implements IMa
                             GTRegistration.REGISTRATE,
                             FMLClientSetupEvent.class,
                             ($) -> {
+                                // SplitShaftVisual draws a half shaft per end of the axis and asks the machine
+                                // whether each end is actually wanted, so a shop whose shaft only enters from
+                                // behind does not render a stub through its shopfront. Create's plain shaft
+                                // visual draws one full-length cylinder regardless of the machine's faces.
                                 SimpleBlockEntityVisualizer.builder(type)
-                                        .factory(SingleAxisRotatingVisual::shaft)
+                                        .factory(SplitShaftVisual::new)
                                         .skipVanillaRender((be) -> false)
                                         .apply();
 

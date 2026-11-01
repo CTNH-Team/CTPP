@@ -1,0 +1,28 @@
+{
+  "variants": {
+    "facing=down": {
+      "model": "ctpp:block/machine/lv_market",
+      "x": 90
+    },
+    "facing=east": {
+      "model": "ctpp:block/machine/lv_market",
+      "y": 90
+    },
+    "facing=north": {
+      "model": "ctpp:block/machine/lv_market"
+    },
+    "facing=south": {
+      "model": "ctpp:block/machine/lv_market",
+      "y": 180
+    },
+    "facing=up": {
+      "gtceu:z": 180,
+      "model": "ctpp:block/machine/lv_market",
+      "x": 270
+    },
+    "facing=west": {
+      "model": "ctpp:block/machine/lv_market",
+      "y": 270
+    }
+  }
+}

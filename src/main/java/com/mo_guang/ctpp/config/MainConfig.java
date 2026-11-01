@@ -220,6 +220,10 @@ public class MainConfig {
         @Configurable.Comment("Electric Gearbox's RPM per amp (1~256)")
         @Configurable.Range(min = 1, max = 256)
         public int electricGearBoxRpmPerAmp = 16;
+        @Configurable
+        @Configurable.Comment("Stress applied to the Create network by the Kinetic Trading Machine while trading (0~1024)")
+        @Configurable.DecimalRange(min = 0.0, max = 1024.0)
+        public float marketStressPerTrade = 64.0f;
     }
 
     public static class CTNHConfig {

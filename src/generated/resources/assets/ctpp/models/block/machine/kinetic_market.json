@@ -1,0 +1,10 @@
+{
+  "parent": "minecraft:block/block",
+  "loader": "gtceu:machine",
+  "machine": "ctpp:kinetic_market",
+  "variants": {
+    "": {
+      "model": "ctpp:block/market/kinetic_market"
+    }
+  }
+}

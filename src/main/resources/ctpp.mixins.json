@@ -32,6 +32,7 @@
     "create.fix.DeployerApplicationRecipeMixin",
     "create.fix.DeployerApplicationRecipeMixin$StockTickerBlockEntityMixin",
     "create.fix.SequencedAssemblyCategoryMixin",
+    "gtm.MachineModelMarketOverlayMixin",
     "mc.MinecraftPickBlockMixin"
   ],
   "minVersion": "0.8"

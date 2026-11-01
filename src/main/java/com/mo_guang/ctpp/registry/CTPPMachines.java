@@ -29,6 +29,8 @@ import com.mo_guang.ctpp.api.CTPPPartAbility;
 import com.mo_guang.ctpp.api.KineticMachineDefinition;
 import com.mo_guang.ctpp.common.block.KineticMachineBlock;
 import com.mo_guang.ctpp.common.blockentity.KineticMachineBlockEntity;
+import com.mo_guang.ctpp.common.machine.market.KineticTradingMachine;
+import com.mo_guang.ctpp.common.machine.market.TradingMachine;
 import com.mo_guang.ctpp.common.machine.multiblock.part.KineticPartMachine;
 import com.mo_guang.ctpp.common.machine.multiblock.part.MechanicalUpgradePartMachine;
 import com.mo_guang.ctpp.common.machine.simple.CarbonBrushesGeneratorMachine;
@@ -137,6 +139,76 @@ public class CTPPMachines {
     @EN("Energy Output for Generator Coil")
     static Lang carbon_brushes;
 
+    @CN("交易机：按单据买卖物品与流体")
+    @EN("Trading Machine: buys and sells items or fluids from tickets")
+    static Lang market_trading;
+
+    @CN("放入单据、货物与金钱后按单据逐条自动交易")
+    @EN("Load tickets, goods and money; tickets are settled one line at a time")
+    static Lang market_trading_tooltip;
+
+    @CN("每笔交易移动 1 个物品 / 1mB 流体，价格即单价")
+    @EN("Each trade moves 1 item or 1mB of fluid; the ticket price is the unit price")
+    static Lang market_batch;
+
+    @CN("货物模式（无 / 自动输出 / 代理）在方向设置中配置")
+    @EN("Goods modes (None / Auto Output / Proxy) are set in Directional Setup")
+    static Lang market_io_hint;
+
+    /**
+     * Registers the three trading machines: stress-driven, LV and MV.
+     * <p>
+     * The stress variant uses the kinetic block family so Create can drive it; the two electric variants use the
+     * plain tiered hull. All three share one class, so only the block/energy plumbing differs.
+     */
+    private static void registerMarketMachines() {
+        // The stress variant is a single machine, so it is registered directly instead of through the tiered helper
+        // (which would prefix it with the voltage tier and produce "lv_kinetic_market").
+        REGISTRATE.machine("kinetic_market",
+                "应力交易机",
+                id -> new KineticMachineDefinition(id, false, MainConfig.INSTANCE.gtmConfig.marketStressPerTrade)
+                        .setFrontRotation(true),
+                holder -> new KineticTradingMachine(holder),
+                KineticMachineBlock::new,
+                MetaMachineItem::new,
+                KineticMachineBlockEntity::create)
+                .cnLangValue("应力交易机")
+                .langValue("Kinetic Trading Machine")
+                .tier(LV)
+                .blockProp(BlockBehaviour.Properties::noOcclusion)
+                .hasBER(false)
+                .onBlockEntityRegister(KineticMachineBlockEntity::onBlockEntityRegister)
+                .itemBuilder(ItemAxisBuilder::addShaft)
+                .rotationState(RotationState.ALL)
+                // Jack's Economy's mechanical exporter model verbatim, retargeted at CTPP's copy of its textures:
+                // a `$` shopfront, a gearbox at the back, and machine casing on the sides.
+                //
+                // The base lives under models/block/market/ rather than models/block/machine/ on purpose: GT's
+                // model loader writes its own wrapper to models/block/machine/<id>, so keeping the hand-written
+                // base out of that path avoids the two trees colliding during processResources.
+                .model((ctx, prov, modelBuilder) -> {
+                    var model = prov.models().getExistingFile(CTPP.id("block/market/kinetic_market"));
+                    modelBuilder.forAllStatesModels(state -> model);
+                })
+                .tooltips(market_trading.translate(), market_trading_tooltip.translate(),
+                        market_batch.translate(), market_io_hint.translate())
+                .register();
+
+        for (int tier : new int[] { LV, MV }) {
+            final int machineTier = tier;
+            REGISTRATE.machine(VN[tier].toLowerCase(Locale.ROOT) + "_market",
+                    holder -> new TradingMachine(holder, machineTier))
+                    .langValue(VNF[tier] + " Trading Machine")
+                    .cnLangValue(VNF[tier] + " 交易机")
+                    .rotationState(RotationState.ALL)
+                    .tier(tier)
+                    .model(createTieredCustomModel(CTPP.id("block/machine/market")))
+                    .tooltips(market_trading.translate(), market_trading_tooltip.translate(),
+                            market_batch.translate(), market_io_hint.translate())
+                    .register();
+        }
+    }
+
     @CN("§e最大输出电流§r %sA")
     @EN("§eMax Output Amperage:§r %sA")
     static Lang max_output_amperage;
@@ -222,6 +294,8 @@ public class CTPPMachines {
                         .tier(tier)
                         .register(),
                 ALL_TIERS);
+
+        registerMarketMachines();
 
         CARBON_BRUSHES = REGISTRATE.machine("carbon_brushes",
                 "碳刷",
