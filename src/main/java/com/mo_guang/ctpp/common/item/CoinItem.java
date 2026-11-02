@@ -8,6 +8,7 @@ import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.level.Level;
 
 import com.mo_guang.ctpp.common.machine.market.CoinTooltip;
+import com.mo_guang.ctpp.common.machine.market.CurrencyUtil;
 
 import java.util.List;
 
@@ -28,6 +29,6 @@ public class CoinItem extends Item {
         super.appendHoverText(stack, level, tooltip, flag);
         // Shift is only consulted on the client, and only when a tooltip is actually built, so the client-only
         // Screen reference never loads on a dedicated server.
-        CoinTooltip.append(tooltip, CoinTooltip.valueOf(stack), Screen.hasShiftDown());
+        CoinTooltip.append(tooltip, CurrencyUtil.valueOf(stack), Screen.hasShiftDown());
     }
 }

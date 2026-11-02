@@ -166,7 +166,7 @@ public class CTPPMachines {
         // (which would prefix it with the voltage tier and produce "lv_kinetic_market").
         REGISTRATE.machine("kinetic_market",
                 "应力交易机",
-                id -> new KineticMachineDefinition(id, false, MainConfig.INSTANCE.gtmConfig.marketStressPerTrade)
+                id -> new KineticMachineDefinition(id, false, MainConfig.INSTANCE.gtmConfig.marketStressPerRpm)
                         .setFrontRotation(true),
                 holder -> new KineticTradingMachine(holder),
                 KineticMachineBlock::new,

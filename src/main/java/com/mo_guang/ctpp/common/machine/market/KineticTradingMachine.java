@@ -25,26 +25,20 @@ import javax.annotation.ParametersAreNonnullByDefault;
 @MethodsReturnNonnullByDefault
 public class KineticTradingMachine extends TradingMachine implements IKineticMachine {
 
-    @CN("运行中会向动力网络施加应力")
-    @EN("Applies stress to the kinetic network while trading")
+    @CN("接入动力网络时持续施加应力")
+    @EN("Applies stress for as long as the network turns it")
     private static Lang kinetic_trading_tooltip;
 
-    @CN("§a应力消耗：§f%s su")
-    @EN("§aStress Impact: §f%s su")
+    @CN("§a应力消耗：§f%s su/RPM")
+    @EN("§aStress Impact: §f%s su/RPM")
     private static Lang stress_impact;
 
     @CN("§a转速需求：§f> 0 RPM")
     @EN("§aSpeed Required: §f> 0 RPM")
     private static Lang speed_required;
 
-    /** Stress (su) charged to the network while a trade is in flight. */
-    private static final float STRESS_PER_TRADE = 64.0f;
-    /** How many ticks the stress stays applied after a trade settles. */
-    private static final int STRESS_DURATION = 40;
     /** Shaft speed that yields the base trade rate. */
     private static final float NOMINAL_RPM = 256.0f;
-
-    private int stressTicks;
 
     public KineticTradingMachine(IMachineBlockEntity holder) {
         super(holder, com.gregtechceu.gtceu.api.GTValues.LV);
@@ -84,38 +78,16 @@ public class KineticTradingMachine extends TradingMachine implements IKineticMac
      */
     @Override
     protected List<Component> energyTooltip() {
+        // The impact comes from the machine definition, which is what Create actually bills the network for; a
+        // constant here would drift from the configured value as soon as anyone changed it.
         return List.of(
-                stress_impact.translate(String.format(Locale.ROOT, "%.0f", STRESS_PER_TRADE)),
+                stress_impact.translate(String.format(Locale.ROOT, "%.0f", stressImpact())),
                 speed_required.translate());
     }
 
-    @Override
-    protected void afterTrade() {
-        // Deliberately no super call: a kinetic shop is driven by rotation, not by the EU buffer.
-        stressTicks = STRESS_DURATION;
-        updateStress(true);
-    }
-
-    @Override
-    public void onLoad() {
-        super.onLoad();
-        if (!isRemote()) {
-            subscribeServerTick(this::tickStress);
-        }
-    }
-
-    private void tickStress() {
-        if (stressTicks > 0 && --stressTicks == 0) {
-            updateStress(false);
-        }
-    }
-
-    private void updateStress(boolean active) {
-        var holder = getKineticHolder();
-        if (holder.hasNetwork()) {
-            holder.getOrCreateNetwork().updateStressFor(holder, active ? STRESS_PER_TRADE : 0.0f);
-            holder.getOrCreateNetwork().updateStress();
-        }
+    /** The stress this machine adds to a network, before Create scales it by the shaft speed. */
+    private float stressImpact() {
+        return getKineticDefinition().getTorque();
     }
 
     @Override

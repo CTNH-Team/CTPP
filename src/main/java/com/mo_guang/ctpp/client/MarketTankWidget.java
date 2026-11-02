@@ -19,8 +19,10 @@ import org.jetbrains.annotations.NotNull;
 /**
  * Tank widget with the amount in the bottom-right corner; {@link TankWidget} hard-codes a centred position with no
  * setter. Fill ratio, hover and tooltip are inherited.
+ * <p>
+ * Only the drawing method is client-only, matching {@link TankWidget} itself. Marking the whole class would strip it
+ * on a dedicated server, where widget construction still runs.
  */
-@OnlyIn(Dist.CLIENT)
 public class MarketTankWidget extends TankWidget {
 
     private static final int TEXT_COLOUR = 0xFFFFFF;
