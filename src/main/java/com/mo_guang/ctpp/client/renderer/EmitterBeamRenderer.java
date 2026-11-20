@@ -6,6 +6,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -49,6 +50,17 @@ public final class EmitterBeamRenderer {
     public static void removeBeam(int id) {
         BEAMS.remove(id);
         BEAM_DIMS.remove(id);
+    }
+
+    /**
+     * Failsafe: tracked beams belong to the session's server — drop all of them on logout so a
+     * stale beam can never survive into the next world join (the server re-sends live beams on
+     * chunk watch anyway).
+     */
+    @SubscribeEvent
+    public static void onLogout(ClientPlayerNetworkEvent.LoggingOut event) {
+        BEAMS.clear();
+        BEAM_DIMS.clear();
     }
 
     @SubscribeEvent

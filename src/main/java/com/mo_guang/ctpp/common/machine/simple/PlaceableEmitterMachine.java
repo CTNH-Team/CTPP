@@ -4,6 +4,7 @@ import com.gregtechceu.gtceu.api.GTValues;
 import com.gregtechceu.gtceu.api.capability.GTCapabilityHelper;
 import com.gregtechceu.gtceu.api.capability.IEnergyContainer;
 import com.gregtechceu.gtceu.api.gui.GuiTextures;
+import com.gregtechceu.gtceu.api.item.tool.ToolHelper;
 import com.gregtechceu.gtceu.api.machine.IMachineBlockEntity;
 import com.gregtechceu.gtceu.api.machine.TickableSubscription;
 import com.gregtechceu.gtceu.api.machine.TieredEnergyMachine;
@@ -31,7 +32,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
@@ -278,7 +282,12 @@ public class PlaceableEmitterMachine extends TieredEnergyMachine
 
     private void updateBeam(ServerLevel level, List<Vec3> points, long voltage, long amps) {
         if (beamId < 0) beamId = EmitterBeamTracker.newBeamId();
-        if (voltage == sentVoltage && amps == sentAmps && pointsEqual(sentPoints, points)) return;
+        if (voltage == sentVoltage && amps == sentAmps && pointsEqual(sentPoints, points)) {
+            // the beam is unchanged but alive: heartbeat it so the tracker's orphan sweep
+            // doesn't collect it
+            EmitterBeamTracker.touchBeam(level, beamId);
+            return;
+        }
         sentPoints = points;
         sentVoltage = voltage;
         sentAmps = amps;
@@ -348,6 +357,38 @@ public class PlaceableEmitterMachine extends TieredEnergyMachine
 
     public boolean isBeamActive() {
         return !transferDisabled && energyContainer.getEnergyStored() > 0;
+    }
+
+    //////////////////////////////////////
+    // ******** Interaction **********//
+    //////////////////////////////////////
+    /**
+     * Never open the UI while holding a GT tool (wrench, screwdriver, ...): tool clicks are
+     * machine interactions of their own, and opening the UI on top of them makes wrench
+     * rotation look broken.
+     */
+    @Override
+    public boolean shouldOpenUI(Player player, InteractionHand hand, BlockHitResult hit) {
+        return ToolHelper.getToolTypes(player.getItemInHand(hand)).isEmpty();
+    }
+
+    /**
+     * The emitter has no auto-output sides for the wrench to configure, so the wrench is purely
+     * a rotation tool here: clicking any face aims the emitter at it, with or without shift
+     * (GT only rotates on shift-click, which reads as "rotation does nothing" on a machine
+     * without wrench configuration). Clicking the current front face is rejected, as a machine
+     * cannot face itself.
+     */
+    @Override
+    protected InteractionResult onWrenchClick(Player playerIn, InteractionHand hand, Direction gridSide,
+                                              BlockHitResult hitResult) {
+        if (gridSide == getFrontFacing() || !isFacingValid(gridSide)) {
+            return InteractionResult.FAIL;
+        }
+        if (!isRemote()) {
+            setFrontFacing(gridSide);
+        }
+        return InteractionResult.sidedSuccess(isRemote());
     }
 
     //////////////////////////////////////
